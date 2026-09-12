@@ -21,6 +21,7 @@ pub mod fold;
 pub mod import;
 pub mod log;
 pub mod mutation;
+pub mod non_empty;
 pub mod outbox;
 pub mod query;
 pub mod record;
@@ -49,6 +50,7 @@ pub use mutation::{
     IdentifiedMutationReceipt, IdentifiedRetraction, KeyedAssertion, KeyedMutation, Mutation,
     MutationReceipt, Retraction, WriteOperation,
 };
+pub use non_empty::{NonEmpty, NonEmptyError, NonEmptyIterator};
 pub use outbox::{Durability, MirrorAcknowledgement, MirrorHead, OutboxEntry};
 pub use query::{
     AggregatePlan, FieldSelection, IdentifiedQueryPlan, IdentifiedQuerySnapshot,

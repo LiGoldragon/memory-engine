@@ -6,13 +6,13 @@
 
 use std::collections::HashSet;
 
+use crate::non_empty::NonEmpty;
 use rkyv::api::high::HighDeserializer;
 use rkyv::bytecheck::CheckBytes;
 use rkyv::rancor::{self, Strategy};
 use rkyv::validation::Validator;
 use rkyv::validation::archive::ArchiveValidator;
 use rkyv::validation::shared::SharedValidator;
-use signal_frame::NonEmpty;
 use signal_sema::SemaOperation;
 
 use crate::commit_log::CommitLog;

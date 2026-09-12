@@ -288,7 +288,6 @@ sections that follow realize it.
 ```mermaid
 flowchart TD
     signal_sema["signal-sema<br/>SemaOperation"]
-    signal_frame["signal-frame<br/>NonEmpty utility today"]
     sema["sema<br/>storage kernel"]
     engine["sema-engine<br/>database operation execution"]
     component["component daemon<br/>Kameo actor tree"]
@@ -296,7 +295,6 @@ flowchart TD
 
     engine --> sema
     engine --> signal_sema
-    engine --> signal_frame
     component --> engine
     sema --> database
 ```

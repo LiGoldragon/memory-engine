@@ -29,6 +29,7 @@
 
 use std::collections::HashMap;
 
+use crate::non_empty::NonEmpty;
 use rkyv::api::high::HighDeserializer;
 use rkyv::bytecheck::CheckBytes;
 use rkyv::rancor::{self, Strategy};
@@ -36,7 +37,6 @@ use rkyv::validation::Validator;
 use rkyv::validation::archive::ArchiveValidator;
 use rkyv::validation::shared::SharedValidator;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use signal_frame::NonEmpty;
 
 use crate::subscribe::SubscriptionRegistry;
 use crate::{

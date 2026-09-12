@@ -1,7 +1,7 @@
 # sema-engine
 
-`sema-engine` is the full database engine library over `sema`,
-`signal-frame`, and `signal-sema`. It executes typed database verbs over component-owned
+`sema-engine` is the full database engine library over `sema` and
+`signal-sema`. It executes typed database verbs over component-owned
 `.sema` files.
 
 It is library-only: no daemon, no actors, no sockets, no NOTA parser,

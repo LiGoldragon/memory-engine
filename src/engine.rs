@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use crate::non_empty::NonEmpty;
 use rkyv::api::high::HighDeserializer;
 use rkyv::bytecheck::CheckBytes;
 use rkyv::rancor::{self, Strategy};
@@ -8,7 +9,6 @@ use rkyv::validation::Validator;
 use rkyv::validation::archive::ArchiveValidator;
 use rkyv::validation::shared::SharedValidator;
 use sema::{Schema, SchemaVersion};
-use signal_frame::NonEmpty;
 use signal_sema::SemaOperation;
 
 use crate::checkpoint::{

@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 use rkyv::rancor;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use sema_engine::NonEmpty;
 use sema_engine::{
     Assertion, Checkpoint, CheckpointMetadata, CheckpointSegment, Engine, EngineOpen, EngineRecord,
     FamilyDirectory, FamilyName, MirrorHead, OutboxEntry, RecordKey, RowMaterializer, SchemaHash,
@@ -22,7 +23,6 @@ use sema_engine::{
     VersionedCommitLogEntry, VersionedLogOperation, VersionedPayload, VersionedRecoveryTopology,
     VersionedStoreName, VersioningPolicy, ViewRow,
 };
-use signal_frame::NonEmpty;
 use signal_sema::SemaOperation;
 use tempfile::TempDir;
 

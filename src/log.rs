@@ -1,5 +1,5 @@
+use crate::non_empty::NonEmpty;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use signal_frame::NonEmpty;
 use signal_sema::SemaOperation;
 
 use crate::{CommitSequence, RecordKey, SnapshotIdentifier, TableName};

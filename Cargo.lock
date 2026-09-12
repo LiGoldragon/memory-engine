@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "sema-engine"
-version = "0.15.1"
+version = "0.16.0"
 dependencies = [
  "blake3",
  "core-ethos",
@@ -536,7 +536,6 @@ dependencies = [
  "schema-rust",
  "sema",
  "sema-translator",
- "signal-frame",
  "signal-sema",
  "signal-sema-translator",
  "structural-codec",

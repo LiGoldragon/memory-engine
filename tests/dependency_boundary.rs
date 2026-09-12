@@ -85,6 +85,17 @@ fn sema_engine_has_no_runtime_or_text_dependencies() {
 }
 
 #[test]
+fn signal_frame_is_absent_from_the_graph_a_consumer_inherits() {
+    let fixture = RepositoryFixture::current();
+    let tree = fixture.cargo_tree(&["--edges", "normal", "--all-features"]);
+
+    assert!(
+        !tree.contains("signal-frame"),
+        "the retired envelope layer must not reach a sema-engine consumer:\n{tree}"
+    );
+}
+
+#[test]
 fn sema_engine_normal_dependency_tree_has_no_nota_next() {
     let fixture = RepositoryFixture::current();
     let tree = fixture.cargo_tree(&["--edges", "normal", "--no-default-features"]);
@@ -126,7 +137,6 @@ fn strict_sema_generation_uses_one_exact_published_producer_train() {
         "rust-logos = { git = \"https://github.com/LiGoldragon/rust-logos.git\", rev = \"081e99596826b15e2ff7f1356ae8d797b18aeffc\" }",
         "schema-rust = { git = \"https://github.com/LiGoldragon/schema-rust.git\", rev = \"664335240a40728826cfaa09e3100cd867031912\", default-features = false }",
         "sema-translator = { git = \"https://github.com/LiGoldragon/sema-translator.git\", rev = \"287fbd728a05b1a6be1dc8a28bcf3ca06d9916b3\", default-features = false }",
-        "signal-frame = { git = \"https://github.com/LiGoldragon/signal-frame.git\", rev = \"8aa0bcaeb29fe9e461a11706a469638d2fd109ac\", default-features = false }",
         "signal-sema-translator = { git = \"https://github.com/LiGoldragon/signal-sema-translator.git\", rev = \"3f41813dd63904c7e2b3da4382eff64ed1bf12fe\" }",
     ] {
         assert!(
@@ -142,7 +152,6 @@ fn strict_sema_generation_uses_one_exact_published_producer_train() {
         "rust-logos",
         "schema-rust",
         "sema-translator",
-        "signal-frame",
         "signal-sema-translator",
     ] {
         assert_eq!(
@@ -175,15 +184,13 @@ fn sema_engine_does_not_depend_on_raw_redb_directly() {
 }
 
 #[test]
-fn sema_engine_depends_on_storage_kernel_frame_kernel_and_signal_sema_by_git() {
+fn sema_engine_depends_on_storage_kernel_and_signal_sema_by_git() {
     let fixture = RepositoryFixture::current();
     let cargo = fixture.cargo_toml();
 
     assert!(cargo.contains("https://github.com/LiGoldragon/sema.git"));
-    assert!(cargo.contains("https://github.com/LiGoldragon/signal-frame.git"));
     assert!(cargo.contains("https://github.com/LiGoldragon/signal-sema.git"));
     assert!(!cargo.contains("path = \"../sema\""));
-    assert!(!cargo.contains("path = \"../signal-frame\""));
     assert!(!cargo.contains("path = \"../signal-sema\""));
     assert!(
         !cargo.contains("signal-core"),
