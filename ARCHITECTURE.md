@@ -125,9 +125,9 @@ sections that follow realize it.
   `DeclaresFamily` descriptor; an identified family also seeds its
   counter). Declared families are validated against the stored catalog
   before that transaction: a conflicting identity or a family bound
-  twice refuses the open with the store left unstamped; a stored prior
-  generation the declaration evolves from is left for `register_table`
-  to evolve. `OpenFault` interrupts the transaction for crash witnesses.
+  twice refuses the open with the store left unstamped; a stored
+  predecessor definition the declaration names is left for
+  `MemoryUpgrades::upgrade_table` to upgrade. `OpenFault` interrupts the transaction for crash witnesses.
   The storage kernel's own header and schema-version stamp (`__sema_meta`,
   written by `sema::Sema::open_with_schema`) is a separate, earlier
   kernel transaction.
@@ -455,42 +455,82 @@ engine.retract_identified(IdentifiedRetraction::new(entries, identifier))?;
 The numeric identifier and the `CommitSequence` are both engine state.
 Component daemons do not keep a parallel ledger.
 
-## Family evolution — read-older-shapes chain at registration
+## Memorable — typed change and typed upgrade
 
-A table descriptor may declare its family's evolution: the prior
-stored generations the engine may find in an existing store's catalog,
-each as a per-family schema hash plus a typed carry that reads rows in
-that generation's own decoded shape and converts them forward to the
-current record type (`TableDescriptor::with_prior`). Registration
-against a store whose catalog names a declared prior migrates the
-family in place inside the engine; consumers no longer reach into
-`__sema_engine_catalog` or hand-write migration transactions.
+`src/memory/` carries the memory kind's two capabilities over a stored
+record type.
 
-- **Atomic**: the rewritten rows, the evolved catalog registration,
-  and the log entries land in one write transaction — the catalog can
-  never name a shape the rows do not have. A failed carry (including a
-  validated decode refusal of mismatched bytes) leaves the store
-  untouched.
-- **Fail-closed**: a stored identity with no declared step — or from a
-  different family reusing the table coordinate — keeps surfacing the
-  original typed `FamilyIdentityMismatch`. Nothing is guessed.
-- **Logged as row history**: on a versioned store, the evolution entry
-  retracts each row under the prior family identity and asserts its
-  converted successor under the evolved identity, so canonical-view
-  folds and rebuilds materialize only current-shape rows and never
-  need the retired shape. The entry's commit sequence is the durable
-  age evidence of the migration. An empty family evolves as a
-  catalog-only rewrite and logs nothing, matching plain registration.
-- **Direct steps, not chained hops**: each declared generation carries
-  its own conversion to the current shape. A store parked two
-  generations back converts in one step through its own declaration.
-- **Domain-keyed families only, today**: `IdentifiedTableDescriptor`
-  has no evolution surface yet; identified families keep their
-  existing restore paths (checkpoint import, rebuild-from-log). The
+**Typed change.** A record type implementing `Memorable` owns its
+`Change` and its `Refusal`: `change(current: Option<&Self>, &Change)`
+answers `Decision::Ready(successor)` or `Decision::Refused(reason)`,
+purely. `MemoryChanges::change(MemoryChange)` on `Engine` admits,
+reads, lets the record decide, and commits; it answers one of three
+branches:
+
+- `ChangeOutcome::Changed(ChangeReceipt)` — the durable receipt: the
+  caller-chosen `ChangeIdentifier`, the effect (created or replaced),
+  the key, commit sequence and snapshot. The receipt lands under its
+  change identity in `__sema_engine_change_receipts` in the same write
+  transaction as the row, the log entries and the counters, so a
+  receipt exists exactly when the change is durable.
+  `MemoryChanges::change_receipt(identity)` resolves an uncertain
+  outcome without replaying; a change resent under a committed
+  identity answers its recorded receipt and is not applied again.
+- `ChangeOutcome::Refused(Record::Refusal)` — the record's own typed
+  reason. Nothing is written; the engine `Error` enum never carries it.
+- `ChangeOutcome::Failed(StorageFailure)` — a structured failure: the
+  `StoragePhase` (`Admission`, `Read`, `Commit` — all confirmed
+  unchanged — or `AfterCommit`, durable and resolvable by identity) and
+  the engine error that caused it.
+
+A typed change refuses to enter an engaged staged group
+(`StagedChangeUnsupported`). The receipts table is engine metadata like
+the counters: it is not folded from the versioned log, so a rebuild or
+checkpoint import does not restore it.
+
+**Typed upgrade.** A record definition declares its manifest version
+and per-family schema hash through `MemoryDefinition`. A definition
+that names a pinned predecessor implements `UpgradeFrom<Predecessor>`:
+the authored, fallible conversion that is the very edit the type needs,
+answering `Decision::Ready(Self)` or `Decision::Refused(typed reason)`.
+`TableDescriptor::with_predecessor::<Predecessor>()` records the
+`ManifestEdge` — the declared version naming its predecessor — mapped to
+the old and new schema hashes. A hash identifies a physical layout; it
+does not stand in for the authored version or conversion.
+
+`MemoryUpgrades::upgrade_table::<Predecessor, Current>(descriptor)`
+upgrades eagerly, whole family, at registration time:
+
+- **Admission**: the edge must be declared, forward (no downgrade is
+  inferred), and name the descriptor's own schema hash; the stored
+  identity must be the same family at the predecessor's hash. Anything
+  else fails with `StoragePhase::Admission`, and a table coordinate
+  reused by another family keeps its `FamilyIdentityMismatch`.
+- **Every row converts before any is written.** A refused row answers
+  `UpgradeOutcome::Refused` with its key and typed reason; a
+  predecessor shape that does not decode fails at `StoragePhase::Read`.
+  In both, the predecessor bytes and format marker stand.
+- **Atomic**: the converted rows, the upgraded catalog registration
+  (the family's format marker) and the log entries land in one write
+  transaction. `UpgradeFault::AfterRowsWritten` interrupts it for crash
+  witnesses; a reopen finds the predecessor marker and predecessor rows
+  only.
+- **Logged as row history**: on a versioned store, the entry retracts
+  each row under the predecessor identity and asserts its successor
+  under the current identity, so folds and rebuilds never need the
+  retired shape. An empty family upgrades as a catalog-only rewrite and
+  logs nothing.
+- `register_table` against a store still holding a declared predecessor
+  refuses with `UpgradePending`; an undeclared stored identity keeps
+  failing closed with `FamilyIdentityMismatch`.
+- **Direct edges, not chained hops**: a definition may declare several
+  predecessors, each with its own conversion. A store parked two
+  definitions back converts through its own declared edge.
+- **Not yet**: identified families have no upgrade surface; lazy
+  per-record conversion is not offered; a family registered later
+  through `register_table` alone lands in its own transaction. The
   storage-kernel schema-version stamp (`__sema_meta`) is a separate,
-  kernel-owned concern. The engine's own layout stamp is atomic with the
-  registration of every family declared at open; a family registered
-  later through `register_table` alone lands in its own transaction.
+  kernel-owned concern.
 
 ## Checkpoint — payload-bearing derived artifact
 
