@@ -251,6 +251,10 @@ impl<RecordValue> TableDescriptor<RecordValue> {
         self
     }
 
+    pub fn with_predecessor<Predecessor>(self) -> Self {
+        self
+    }
+
     pub fn name(&self) -> &TableName {
         &self.name
     }

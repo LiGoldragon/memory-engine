@@ -229,6 +229,41 @@ pub enum Error {
     #[error("deterministic open interruption at {fault:?}")]
     OpenInterrupted { fault: crate::OpenFault },
 
+    #[error("a typed change cannot enter an engaged staged group: {table}")]
+    StagedChangeUnsupported { table: String },
+
+    #[error(
+        "table {table} holds its {predecessor} predecessor; upgrade it to {current} \
+         through its declared upgrade before registering"
+    )]
+    UpgradePending {
+        table: String,
+        predecessor: crate::MemoryVersion,
+        current: crate::MemoryVersion,
+    },
+
+    #[error("table {table} declares no manifest edge from {predecessor}")]
+    PredecessorUndeclared {
+        table: String,
+        predecessor: crate::MemoryVersion,
+    },
+
+    #[error("table {table} declares a backward manifest edge {predecessor} to {current}")]
+    ManifestEdgeBackward {
+        table: String,
+        predecessor: crate::MemoryVersion,
+        current: crate::MemoryVersion,
+    },
+
+    #[error("table {table} declares {current} under a schema hash its descriptor does not carry")]
+    ManifestEdgeMismatch {
+        table: String,
+        current: crate::MemoryVersion,
+    },
+
+    #[error("deterministic upgrade interruption at {fault:?}")]
+    UpgradeInterrupted { fault: crate::UpgradeFault },
+
     #[error("no staging session is engaged; {surface} requires begin_staged_group first")]
     StagingSessionNotEngaged { surface: &'static str },
 

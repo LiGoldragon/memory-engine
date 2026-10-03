@@ -20,6 +20,7 @@ pub mod error;
 pub mod fold;
 pub mod import;
 pub mod log;
+pub mod memory;
 pub mod mutation;
 pub mod non_empty;
 pub mod open;
@@ -46,6 +47,12 @@ pub use error::{Error, Result};
 pub use fold::{FamilyDirectory, RebuildReceipt, RowMaterializer, ViewDigest, ViewRow};
 pub use import::{ImportReceipt, ImportSession};
 pub use log::{CommitLogEntry, CommitLogOperation};
+pub use memory::{
+    ChangeEffect, ChangeIdentifier, ChangeOutcome, ChangeReceipt, Decision, DeclaredVersion,
+    ManifestEdge, Memorable, MemoryChange, MemoryChanges, MemoryDefinition, MemoryUpgrades,
+    MemoryVersion, StorageFailure, StoragePhase, UpgradeFault, UpgradeFrom, UpgradeOutcome,
+    UpgradeReceipt, UpgradeRefusal,
+};
 pub use mutation::{
     Assertion, CommitReceipt, CommitRequest, IdentifiedAssertion, IdentifiedMutation,
     IdentifiedMutationReceipt, IdentifiedRetraction, KeyedAssertion, KeyedMutation, Mutation,

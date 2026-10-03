@@ -85,7 +85,7 @@ const COMPACTION_INTENT_KEY: &str = "pending";
 pub struct Engine {
     pub(crate) storage: sema::Sema,
     catalog: Catalog,
-    subscriptions: SubscriptionRegistry,
+    pub(crate) subscriptions: SubscriptionRegistry,
     pub(crate) versioning_policy: Option<VersioningPolicy>,
     /// Serializes the engine's own read-compute-write path so two
     /// `&self` callers cannot each read the same chain head, commit
@@ -2580,7 +2580,7 @@ impl Engine {
     /// Acquire the staging-session slot. Poison propagation mirrors
     /// [`Self::write_guard`]: a panic while the session lock is held
     /// leaves build state unrecoverable, so unwrapping is correct.
-    fn staging_guard(&self) -> std::sync::MutexGuard<'_, Option<StagingSession>> {
+    pub(crate) fn staging_guard(&self) -> std::sync::MutexGuard<'_, Option<StagingSession>> {
         self.staging
             .lock()
             .expect("engine staging session lock poisoned by a panicking writer")
@@ -3438,7 +3438,10 @@ impl Engine {
         Ok(value)
     }
 
-    fn ensure_registered<RecordValue>(&self, table: &TableReference<RecordValue>) -> Result<()> {
+    pub(crate) fn ensure_registered<RecordValue>(
+        &self,
+        table: &TableReference<RecordValue>,
+    ) -> Result<()> {
         if self.catalog.is_registered(table.name()) {
             Ok(())
         } else {
@@ -3537,7 +3540,7 @@ impl Engine {
         Ok(())
     }
 
-    fn versioned_record_entry<RecordValue>(
+    pub(crate) fn versioned_record_entry<RecordValue>(
         &self,
         commit_sequence: crate::CommitSequence,
         snapshot: SnapshotIdentifier,
