@@ -1,7 +1,13 @@
-use std::marker::PhantomData;
+use std::{collections::BTreeMap, sync::Arc};
 
 use signal_sema::SemaOperation;
 
+use rkyv::api::high::HighDeserializer;
+use rkyv::bytecheck::CheckBytes;
+use rkyv::rancor::{self, Strategy};
+use rkyv::validation::Validator;
+use rkyv::validation::archive::ArchiveValidator;
+use rkyv::validation::shared::SharedValidator;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::{
@@ -47,11 +53,22 @@ impl<RecordValue> QueryPlan<RecordValue> {
         }
     }
 
-    pub fn filtered(table: TableReference<RecordValue>, predicate: PredicatePlan) -> Self {
+    /// Every row of the table that the typed predicate admits.
+    pub fn filtered(
+        table: TableReference<RecordValue>,
+        predicate: impl RecordPredicate<RecordValue> + 'static,
+    ) -> Self {
+        Self::all(table).filtered_by(predicate)
+    }
+
+    /// Narrow this plan's rows to those the typed predicate admits. The
+    /// key filter a subscription matches deltas by is unchanged, which is
+    /// why a filtered plan is a read, never a subscription.
+    pub fn filtered_by(self, predicate: impl RecordPredicate<RecordValue> + 'static) -> Self {
         Self {
-            table,
-            filter: QueryFilter::All,
-            read_plan: ReadPlan::filter(ReadPlan::all_rows(), predicate),
+            table: self.table,
+            filter: self.filter,
+            read_plan: ReadPlan::filter(self.read_plan, RecordFilter::new(predicate)),
         }
     }
 
@@ -224,10 +241,9 @@ impl RecordIdentifierRange {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ReadPlan<RecordValue> {
-    node: ReadPlanNode,
-    record: PhantomData<fn() -> RecordValue>,
+    node: ReadPlanNode<RecordValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -248,7 +264,7 @@ impl<RecordValue> ReadPlan<RecordValue> {
         Self::new(ReadPlanNode::ByKeyRange(range))
     }
 
-    pub fn filter(source: Self, predicate: PredicatePlan) -> Self {
+    pub fn filter(source: Self, predicate: RecordFilter<RecordValue>) -> Self {
         Self::new(ReadPlanNode::Filter {
             source: Box::new(source.node),
             predicate,
@@ -291,15 +307,12 @@ impl<RecordValue> ReadPlan<RecordValue> {
         self.node.operator()
     }
 
-    pub fn node(&self) -> &ReadPlanNode {
+    pub fn node(&self) -> &ReadPlanNode<RecordValue> {
         &self.node
     }
 
-    fn new(node: ReadPlanNode) -> Self {
-        Self {
-            node,
-            record: PhantomData,
-        }
+    fn new(node: ReadPlanNode<RecordValue>) -> Self {
+        Self { node }
     }
 }
 
@@ -329,32 +342,32 @@ impl IdentifiedReadPlan {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReadPlanNode {
+#[derive(Debug, Clone)]
+pub enum ReadPlanNode<RecordValue> {
     AllRows,
     ByKey(RecordKey),
     ByKeyRange(KeyRange),
     Filter {
-        source: Box<ReadPlanNode>,
-        predicate: PredicatePlan,
+        source: Box<ReadPlanNode<RecordValue>>,
+        predicate: RecordFilter<RecordValue>,
     },
     Constrain {
         unify: UnificationPlan,
     },
     Project {
-        source: Box<ReadPlanNode>,
+        source: Box<ReadPlanNode<RecordValue>>,
         fields: FieldSelection,
     },
     Aggregate {
-        source: Box<ReadPlanNode>,
+        source: Box<ReadPlanNode<RecordValue>>,
         reducer: AggregatePlan,
     },
     Infer {
-        source: Box<ReadPlanNode>,
+        source: Box<ReadPlanNode<RecordValue>>,
         rules: RuleSetRef,
     },
     Recurse {
-        seed: Box<ReadPlanNode>,
+        seed: Box<ReadPlanNode<RecordValue>>,
         mode: RecursionMode,
     },
 }
@@ -366,7 +379,7 @@ pub enum IdentifiedReadPlanNode {
     ByIdentifierRange(RecordIdentifierRange),
 }
 
-impl ReadPlanNode {
+impl<RecordValue> ReadPlanNode<RecordValue> {
     pub fn operator(&self) -> ReadOperator {
         match self {
             Self::AllRows => ReadOperator::AllRows,
@@ -408,20 +421,116 @@ pub enum ReadOperator {
     Recurse,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PredicatePlan {
-    expression: String,
+/// A typed selection over stored records: what the `Filter` read plan
+/// keeps. A component implements it on a data-bearing type naming what it
+/// selects by, so the plan carries the component's own typed question
+/// rather than an expression string the engine would have to parse.
+pub trait RecordPredicate<RecordValue>: Send + Sync {
+    fn admits(&self, record: &RecordValue) -> bool;
 }
 
-impl PredicatePlan {
-    pub fn new(expression: impl Into<String>) -> Self {
+/// The shared, clonable holder of one typed predicate inside a read plan.
+pub struct RecordFilter<RecordValue> {
+    predicate: Arc<dyn RecordPredicate<RecordValue>>,
+}
+
+impl<RecordValue> RecordFilter<RecordValue> {
+    pub fn new(predicate: impl RecordPredicate<RecordValue> + 'static) -> Self {
         Self {
-            expression: expression.into(),
+            predicate: Arc::new(predicate),
         }
     }
+}
 
-    pub fn expression(&self) -> &str {
-        &self.expression
+impl<RecordValue> RecordPredicate<RecordValue> for RecordFilter<RecordValue> {
+    fn admits(&self, record: &RecordValue) -> bool {
+        self.predicate.admits(record)
+    }
+}
+
+impl<RecordValue> Clone for RecordFilter<RecordValue> {
+    fn clone(&self) -> Self {
+        Self {
+            predicate: Arc::clone(&self.predicate),
+        }
+    }
+}
+
+impl<RecordValue> std::fmt::Debug for RecordFilter<RecordValue> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("RecordFilter")
+    }
+}
+
+/// Where a read plan's leaves draw their rows: the committed store inside
+/// one read transaction, or a staging session's overlay of it.
+pub trait RowSource<RecordValue> {
+    fn all_rows(&self) -> crate::Result<Vec<RecordValue>>;
+    fn by_key(&self, key: &RecordKey) -> crate::Result<Vec<RecordValue>>;
+    fn by_key_range(&self, range: &KeyRange) -> crate::Result<Vec<RecordValue>>;
+}
+
+/// Executes a read plan over a row source. Leaves read the source;
+/// `Filter` keeps the rows its typed predicate admits from its source's
+/// rows; the remaining operators answer `UnsupportedReadPlan`.
+pub trait ReadPlanExecution<RecordValue> {
+    fn select(&self, source: &dyn RowSource<RecordValue>) -> crate::Result<Vec<RecordValue>>;
+}
+
+impl<RecordValue> ReadPlanExecution<RecordValue> for ReadPlanNode<RecordValue> {
+    fn select(&self, source: &dyn RowSource<RecordValue>) -> crate::Result<Vec<RecordValue>> {
+        match self {
+            Self::AllRows => source.all_rows(),
+            Self::ByKey(key) => source.by_key(key),
+            Self::ByKeyRange(range) => source.by_key_range(range),
+            Self::Filter {
+                source: rows,
+                predicate,
+            } => {
+                let mut selected = rows.select(source)?;
+                selected.retain(|record| predicate.admits(record));
+                Ok(selected)
+            }
+            unsupported => Err(crate::Error::UnsupportedReadPlan {
+                operator: unsupported.operator(),
+            }),
+        }
+    }
+}
+
+/// Rows already folded in memory, keyed by their stored key: a staging
+/// session's overlay of committed state.
+pub(crate) struct OverlaidRows<RecordValue> {
+    rows: BTreeMap<String, RecordValue>,
+}
+
+impl<RecordValue> OverlaidRows<RecordValue> {
+    pub(crate) fn new(rows: BTreeMap<String, RecordValue>) -> Self {
+        Self { rows }
+    }
+}
+
+impl<RecordValue: Clone> RowSource<RecordValue> for OverlaidRows<RecordValue> {
+    fn all_rows(&self) -> crate::Result<Vec<RecordValue>> {
+        Ok(self.rows.values().cloned().collect())
+    }
+
+    fn by_key(&self, key: &RecordKey) -> crate::Result<Vec<RecordValue>> {
+        Ok(self
+            .rows
+            .get(&key.to_owned_string())
+            .cloned()
+            .into_iter()
+            .collect())
+    }
+
+    fn by_key_range(&self, range: &KeyRange) -> crate::Result<Vec<RecordValue>> {
+        Ok(self
+            .rows
+            .iter()
+            .filter(|(key, _)| range.contains(&RecordKey::new((*key).clone())))
+            .map(|(_, record)| record.clone())
+            .collect())
     }
 }
 
@@ -639,5 +748,60 @@ impl ValidationReceipt {
 
     pub fn record_count(&self) -> usize {
         self.record_count
+    }
+}
+
+/// The committed rows of one registered table, read inside one storage
+/// read transaction so the rows and the database marker agree.
+pub(crate) struct CommittedRows<'transaction, RecordValue> {
+    transaction: &'transaction sema::ReadTransaction,
+    table: &'transaction TableReference<RecordValue>,
+}
+
+impl<'transaction, RecordValue> CommittedRows<'transaction, RecordValue> {
+    pub(crate) fn new(
+        transaction: &'transaction sema::ReadTransaction,
+        table: &'transaction TableReference<RecordValue>,
+    ) -> Self {
+        Self { transaction, table }
+    }
+}
+
+impl<RecordValue> RowSource<RecordValue> for CommittedRows<'_, RecordValue>
+where
+    RecordValue: crate::EngineStoredValue,
+    <RecordValue as Archive>::Archived: RkyvDeserialize<RecordValue, HighDeserializer<rancor::Error>>
+        + for<'validation> CheckBytes<
+            Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+        >,
+{
+    fn all_rows(&self) -> crate::Result<Vec<RecordValue>> {
+        Ok(self
+            .table
+            .sema_table()
+            .iter(self.transaction)?
+            .into_iter()
+            .map(|(_key, record)| record)
+            .collect())
+    }
+
+    fn by_key(&self, key: &RecordKey) -> crate::Result<Vec<RecordValue>> {
+        Ok(self
+            .table
+            .sema_table()
+            .get(self.transaction, key.to_owned_string())?
+            .into_iter()
+            .collect())
+    }
+
+    fn by_key_range(&self, range: &KeyRange) -> crate::Result<Vec<RecordValue>> {
+        Ok(self
+            .table
+            .sema_table()
+            .iter(self.transaction)?
+            .into_iter()
+            .filter(|(key, _record)| range.contains(&RecordKey::new(key.clone())))
+            .map(|(_key, record)| record)
+            .collect())
     }
 }

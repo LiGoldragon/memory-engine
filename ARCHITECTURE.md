@@ -200,6 +200,16 @@ sections that follow realize it.
   wire need a cleanup pass. Per Spirit 7l7l.
 - Unsupported read-plan operators return typed `UnsupportedReadPlan` errors
   instead of pretending execution succeeded.
+- `Filter` executes. Its predicate is a typed `RecordPredicate` the
+  component implements on a data-bearing type naming what it selects by;
+  the plan holds it as a `RecordFilter`, never as an expression string.
+  It narrows any executable source (`AllRows`, `ByKey`, `ByKeyRange`, or
+  another `Filter`) for `Match`, `Validate`, and staged-session reads.
+  `Subscribe` refuses a filtered plan with `UnsupportedReadPlan`: deltas
+  match by key, and a retraction carries no record for the predicate to
+  judge. `Constrain`, `Project`, `Aggregate`, `Infer`, and `Recurse` stay
+  unsupported; their plans still carry placeholder strings and no consumer
+  asks for them.
 - `Assert`, `Mutate`, and `Retract` write one `CommitLogOperation` entry
   per operation in the same committed write transaction as the domain
   record.
@@ -404,7 +414,7 @@ let _level = engine.store_durability()?;
 
 This proves the layering: registered record family, single-operation `Assert` /
 `Mutate` / `Retract`, structural multi-operation `commit`, `Match`, `Validate`,
-executable `ReadPlan` nodes for all/key/range reads, typed query-algebra
+executable `ReadPlan` nodes for all/key/range reads and typed `Filter`, typed query-algebra
 nodes for future constrain/project/aggregate/infer/recurse execution,
 typed rkyv values, commit-log cursor, bounded log replay, optional
 payload-bearing version replay, table introspection, best-effort

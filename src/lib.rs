@@ -54,9 +54,9 @@ pub use non_empty::{NonEmpty, NonEmptyError, NonEmptyIterator};
 pub use outbox::{Durability, MirrorAcknowledgement, MirrorHead, OutboxEntry};
 pub use query::{
     AggregatePlan, FieldSelection, IdentifiedQueryPlan, IdentifiedQuerySnapshot,
-    IdentifiedReadPlan, IdentifiedReadPlanNode, KeyRange, PredicatePlan, QueryFilter, QueryPlan,
-    QuerySnapshot, ReadOperator, ReadPlan, ReadPlanNode, RecordIdentifierRange, RecursionMode,
-    RuleSetRef, UnificationPlan, ValidationReceipt,
+    IdentifiedReadPlan, IdentifiedReadPlanNode, KeyRange, QueryFilter, QueryPlan, QuerySnapshot,
+    ReadOperator, ReadPlan, ReadPlanExecution, ReadPlanNode, RecordFilter, RecordIdentifierRange,
+    RecordPredicate, RecursionMode, RowSource, RuleSetRef, UnificationPlan, ValidationReceipt,
 };
 pub use record::{
     EngineRecord, EngineStoredRecord, EngineStoredValue, RecordIdentifier, RecordKey, RecordKeyKind,

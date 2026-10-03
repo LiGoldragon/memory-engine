@@ -21,6 +21,7 @@ use crate::fold::{CanonicalView, FamilyDirectory, RebuildReceipt, RowMaterialize
 use crate::import::{ImportReceipt, ImportSession};
 use crate::log::{CommitLogEntry, CommitLogOperation};
 use crate::outbox::{Durability, MirrorAcknowledgement, MirrorHead, Outbox, OutboxEntry};
+use crate::query::{CommittedRows, ReadPlanExecution};
 use crate::staging::{
     DeltaAnnouncer, DiscardStagedReceipt, MaterializeStagedReceipt, OverlayEffect, OverlayPresence,
     StageReceipt, StagedGroupSummary, Staging, StagingBase, StagingSession,
@@ -1145,63 +1146,19 @@ impl Engine {
         }
         drop(staging);
 
-        let (database_marker, records) = match query.read_plan().node() {
-            crate::ReadPlanNode::AllRows => self.storage.read(|transaction| {
-                Ok((
-                    Self::database_marker_from_values(
-                        COUNTERS.get(transaction, LATEST_COMMIT_SEQUENCE_KEY)?,
-                        COUNTERS.get(transaction, LATEST_SNAPSHOT_KEY)?,
-                    ),
-                    query
-                        .table()
-                        .sema_table()
-                        .iter(transaction)?
-                        .into_iter()
-                        .map(|(_key, record)| record)
-                        .collect(),
-                ))
-            })?,
-            crate::ReadPlanNode::ByKey(key) => self.storage.read(|transaction| {
-                Ok((
-                    Self::database_marker_from_values(
-                        COUNTERS.get(transaction, LATEST_COMMIT_SEQUENCE_KEY)?,
-                        COUNTERS.get(transaction, LATEST_SNAPSHOT_KEY)?,
-                    ),
-                    query
-                        .table()
-                        .sema_table()
-                        .get(transaction, key.to_owned_string())?
-                        .into_iter()
-                        .collect(),
-                ))
-            })?,
-            crate::ReadPlanNode::ByKeyRange(range) => self.storage.read(|transaction| {
-                Ok((
-                    Self::database_marker_from_values(
-                        COUNTERS.get(transaction, LATEST_COMMIT_SEQUENCE_KEY)?,
-                        COUNTERS.get(transaction, LATEST_SNAPSHOT_KEY)?,
-                    ),
-                    query
-                        .table()
-                        .sema_table()
-                        .iter(transaction)?
-                        .into_iter()
-                        .filter_map(|(key, record)| {
-                            if range.contains(&crate::RecordKey::new(key)) {
-                                Some(record)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                ))
-            })?,
-            node => {
-                return Err(Error::UnsupportedReadPlan {
-                    operator: node.operator(),
-                });
-            }
-        };
+        let (database_marker, records) = self.storage.read(|transaction| {
+            Ok((
+                Self::database_marker_from_values(
+                    COUNTERS.get(transaction, LATEST_COMMIT_SEQUENCE_KEY)?,
+                    COUNTERS.get(transaction, LATEST_SNAPSHOT_KEY)?,
+                ),
+                query
+                    .read_plan()
+                    .node()
+                    .select(&CommittedRows::new(transaction, query.table())),
+            ))
+        })?;
+        let records = records?;
 
         Ok(QuerySnapshot::new(
             SemaOperation::Match,
@@ -1438,6 +1395,14 @@ impl Engine {
                 Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
             >,
     {
+        // Deltas are matched by key and a retraction carries no record
+        // for a predicate to judge, so a filtered subscription would
+        // deliver rows outside its own view: refuse it, typed.
+        if let crate::ReadPlanNode::Filter { .. } = plan.read_plan().node() {
+            return Err(Error::UnsupportedReadPlan {
+                operator: crate::ReadOperator::Filter,
+            });
+        }
         let snapshot = self.match_records(plan.clone())?;
         let handle = self.next_subscription_handle(&plan, snapshot.snapshot())?;
         let initial = InitialSnapshot::new(handle, snapshot);
@@ -3069,22 +3034,10 @@ impl Engine {
             session.engaged_commit_sequence(),
             session.engaged_snapshot(),
         );
-        let records: Vec<RecordValue> = match query.read_plan().node() {
-            crate::ReadPlanNode::AllRows => rows.into_values().collect(),
-            crate::ReadPlanNode::ByKey(key) => {
-                rows.remove(&key.to_owned_string()).into_iter().collect()
-            }
-            crate::ReadPlanNode::ByKeyRange(range) => rows
-                .into_iter()
-                .filter(|(key, _)| range.contains(&crate::RecordKey::new(key.clone())))
-                .map(|(_, record)| record)
-                .collect(),
-            node => {
-                return Err(Error::UnsupportedReadPlan {
-                    operator: node.operator(),
-                });
-            }
-        };
+        let records = query
+            .read_plan()
+            .node()
+            .select(&crate::query::OverlaidRows::new(rows))?;
         Ok(QuerySnapshot::new(
             SemaOperation::Match,
             *query.table().name(),
