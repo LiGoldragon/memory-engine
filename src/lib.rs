@@ -22,6 +22,7 @@ pub mod import;
 pub mod log;
 pub mod mutation;
 pub mod non_empty;
+pub mod open;
 pub mod outbox;
 pub mod query;
 pub mod record;
@@ -40,7 +41,7 @@ pub use checkpoint::{
     PortableCheckpoint, SegmentDigest, SegmentReference,
 };
 pub use compaction::{CompactionFault, CompactionIntent, CompactionPhase};
-pub use engine::{Engine, EngineOpen, StorageReader};
+pub use engine::{Engine, StorageReader};
 pub use error::{Error, Result};
 pub use fold::{FamilyDirectory, RebuildReceipt, RowMaterializer, ViewDigest, ViewRow};
 pub use import::{ImportReceipt, ImportSession};
@@ -51,6 +52,7 @@ pub use mutation::{
     MutationReceipt, Retraction, WriteOperation,
 };
 pub use non_empty::{NonEmpty, NonEmptyError, NonEmptyIterator};
+pub use open::{DeclaresFamily, EngineOpen, FamilyDeclaration, FamilyKeying, OpenFault};
 pub use outbox::{Durability, MirrorAcknowledgement, MirrorHead, OutboxEntry};
 pub use query::{
     AggregatePlan, FieldSelection, IdentifiedQueryPlan, IdentifiedQuerySnapshot,

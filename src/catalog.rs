@@ -1,6 +1,12 @@
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
-use crate::{Error, FamilyIdentity, Result, TableName};
+use crate::{Error, FamilyDeclaration, FamilyIdentity, Result, TableName};
+
+/// Where a family identity stands against the catalog.
+pub(crate) enum FamilyRegistration {
+    Existing,
+    New(TableRegistration),
+}
 
 /// The engine's registered family inventory. Each registration binds
 /// one family identity to its current table coordinate; the derived
@@ -61,6 +67,60 @@ impl Catalog {
         }
         self.registrations.push(registration);
         Ok(())
+    }
+
+    /// Whether a family identity is already registered here, is new, or
+    /// conflicts with what the catalog binds (a different identity at its
+    /// table, or its family version already bound to another table).
+    pub(crate) fn registration_state(
+        &self,
+        identity: &FamilyIdentity,
+    ) -> Result<FamilyRegistration> {
+        if let Some(stored) = self.registration_for_table(identity.table_name()) {
+            if stored.identity() != identity {
+                return Err(Error::FamilyIdentityMismatch {
+                    table: identity.table_name().to_owned(),
+                    stored: stored.identity().to_string(),
+                    declared: identity.to_string(),
+                });
+            }
+            return Ok(FamilyRegistration::Existing);
+        }
+        if let Some(bound) = self.registration_for_family(identity) {
+            return Err(Error::FamilyAlreadyBound {
+                family: identity.family().as_str().to_owned(),
+                existing: bound.table_name().to_owned(),
+                table: identity.table_name().to_owned(),
+            });
+        }
+        Ok(FamilyRegistration::New(TableRegistration::new(
+            identity.clone(),
+        )))
+    }
+
+    /// Admit one family an open declares: a new family joins this catalog
+    /// and is returned for the open's write transaction to persist; an
+    /// existing one, or a stored prior generation the declaration evolves
+    /// from (left for `register_table`), adds nothing; a conflict is the
+    /// typed error, raised before the open writes anything.
+    pub(crate) fn admit(
+        &mut self,
+        declaration: &FamilyDeclaration,
+    ) -> Result<Option<TableRegistration>> {
+        match self.registration_state(declaration.identity()) {
+            Ok(FamilyRegistration::Existing) => Ok(None),
+            Ok(FamilyRegistration::New(registration)) => {
+                self.insert(registration.clone())?;
+                Ok(Some(registration))
+            }
+            Err(mismatch @ Error::FamilyIdentityMismatch { .. }) => {
+                let evolves = self
+                    .registration_for_table(declaration.identity().table_name())
+                    .is_some_and(|stored| declaration.evolves_from(stored.identity()));
+                if evolves { Ok(None) } else { Err(mismatch) }
+            }
+            Err(other) => Err(other),
+        }
     }
 
     pub fn registrations(&self) -> &[TableRegistration] {

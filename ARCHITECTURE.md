@@ -119,6 +119,18 @@ sections that follow realize it.
   rejecting open never writes to the store it rejects — every layout
   plan (stamp a virgin store, refold an older versioned store) is
   applied only after every open-time validation passes.
+- An open's durable effect is one storage-kernel write transaction: the
+  layout plan, the first versioning-policy row, and the catalog rows of
+  the families the open declares (`EngineOpen::with_family`, from any
+  `DeclaresFamily` descriptor; an identified family also seeds its
+  counter). Declared families are validated against the stored catalog
+  before that transaction: a conflicting identity or a family bound
+  twice refuses the open with the store left unstamped; a stored prior
+  generation the declaration evolves from is left for `register_table`
+  to evolve. `OpenFault` interrupts the transaction for crash witnesses.
+  The storage kernel's own header and schema-version stamp (`__sema_meta`,
+  written by `sema::Sema::open_with_schema`) is a separate, earlier
+  kernel transaction.
 - `Engine` registers record families before executing database operations.
 - Registration declares typed family identity: every `TableDescriptor` /
   `IdentifiedTableDescriptor` carries a `FamilyName` (the schema
@@ -476,9 +488,9 @@ family in place inside the engine; consumers no longer reach into
   has no evolution surface yet; identified families keep their
   existing restore paths (checkpoint import, rebuild-from-log). The
   storage-kernel schema-version stamp (`__sema_meta`) is a separate,
-  kernel-owned concern: additive version stamping still lives with
-  consumers and is not yet atomic with family registration — the
-  recorded debt stands.
+  kernel-owned concern. The engine's own layout stamp is atomic with the
+  registration of every family declared at open; a family registered
+  later through `register_table` alone lands in its own transaction.
 
 ## Checkpoint — payload-bearing derived artifact
 

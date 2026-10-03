@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::non_empty::NonEmpty;
 use rkyv::api::high::HighDeserializer;
@@ -8,18 +8,20 @@ use rkyv::rancor::{self, Strategy};
 use rkyv::validation::Validator;
 use rkyv::validation::archive::ArchiveValidator;
 use rkyv::validation::shared::SharedValidator;
-use sema::{Schema, SchemaVersion};
 use signal_sema::SemaOperation;
 
+use crate::catalog::FamilyRegistration;
 use crate::checkpoint::{
     Checkpoint, CheckpointMetadata, CheckpointReceipt, CheckpointSegment, CheckpointSequence,
     CommitSequenceRange, FamilyInventory, IdentifiedCounter, SegmentReference,
 };
+use crate::commit_log::DerivedSlots;
 use crate::commit_log::{CommitLog, LogCounts};
 use crate::compaction::{CompactionFault, CompactionIntent, CompactionPhase};
 use crate::fold::{CanonicalView, FamilyDirectory, RebuildReceipt, RowMaterializer, ViewRow};
 use crate::import::{ImportReceipt, ImportSession};
 use crate::log::{CommitLogEntry, CommitLogOperation};
+use crate::open::{EngineOpen, FamilyKeying, OpenFault};
 use crate::outbox::{Durability, MirrorAcknowledgement, MirrorHead, Outbox, OutboxEntry};
 use crate::query::{CommittedRows, ReadPlanExecution};
 use crate::staging::{
@@ -155,14 +157,27 @@ impl Engine {
             }
             Err(other) => return Err(other.into()),
         };
-        // Apply the layout plan only after every read-only validation
-        // passed: a virgin store gets its layout slot stamped; an older
-        // store that opted into versioning refolds the layout-introduced
-        // derived slots from its complete log and re-stamps. Open is
-        // single-threaded, so this is the only writer and needs no lock.
-        Self::apply_layout_plan(&storage, layout_plan)?;
-        Self::ensure_durable_versioning_policy(&storage, request.versioning_policy())?;
-        let catalog = Catalog::new(registrations);
+        // Every validation — layout, versioning policy, declared families —
+        // reads only. Their writes then land in one transaction: a virgin
+        // store gets its layout slot stamped, an older versioned store its
+        // refolded derived slots and re-stamp, a first versioned open its
+        // policy row, and the declared families new to the catalog their
+        // rows. Open is single-threaded, so this is the only writer.
+        let policy = Self::validated_versioning_policy(&storage, request.versioning_policy())?;
+        let mut catalog = Catalog::new(registrations);
+        let mut declared = Vec::new();
+        for declaration in request.families() {
+            if let Some(registration) = catalog.admit(declaration)? {
+                declared.push((declaration.keying(), declaration.table(), registration));
+            }
+        }
+        Self::persist_open(
+            &storage,
+            &layout_plan,
+            policy.as_ref(),
+            &declared,
+            request.fault(),
+        )?;
         Ok(Self {
             storage,
             catalog,
@@ -3253,7 +3268,9 @@ impl Engine {
             // unacceptable (Spirit 29pb).
             Some(layout) => {
                 if CommitLog::versioned_log_present(storage)? {
-                    Ok(LayoutOpenPlan::RebuildDerivedSlots)
+                    Ok(LayoutOpenPlan::RebuildDerivedSlots(
+                        CommitLog::refolded_derived_slots(storage)?,
+                    ))
                 } else {
                     Err(Error::StorageLayoutMismatch {
                         stored: layout,
@@ -3283,22 +3300,22 @@ impl Engine {
         }
     }
 
-    /// Carry out the open-time layout plan. Runs only after every
-    /// read-only validation passed, so an open that rejects a store
-    /// never mutates the store it rejects.
-    fn apply_layout_plan(storage: &sema::Sema, plan: LayoutOpenPlan) -> Result<()> {
+    /// Carry out the open-time layout plan inside the open's one write
+    /// transaction. Runs only after every read-only validation passed, so
+    /// an open that rejects a store never mutates the store it rejects.
+    fn apply_layout_plan(
+        transaction: &sema::WriteTransaction,
+        plan: &LayoutOpenPlan,
+    ) -> sema::Result<()> {
         match plan {
             LayoutOpenPlan::Current => Ok(()),
-            LayoutOpenPlan::StampFresh => Ok(storage.write(|transaction| {
+            LayoutOpenPlan::StampFresh => {
                 COUNTERS.insert(transaction, STORAGE_LAYOUT_KEY, &STORAGE_LAYOUT)
-            })?),
-            // Refold the layout-introduced derived slots (the persisted
-            // chain-head digest and the two log-count counters) from the
-            // store's complete versioned log and re-stamp the layout
-            // counter. The log plane owns those slots, so the refold lives
-            // there; the engine names the layout slot and target version.
-            LayoutOpenPlan::RebuildDerivedSlots => {
-                CommitLog::rebuild_derived_slots(storage, STORAGE_LAYOUT_KEY, STORAGE_LAYOUT)
+            }
+            // The log plane owns the derived slots it refolded; the engine
+            // names the layout slot and the target version.
+            LayoutOpenPlan::RebuildDerivedSlots(slots) => {
+                slots.write(transaction, STORAGE_LAYOUT_KEY, STORAGE_LAYOUT)
             }
         }
     }
@@ -3308,49 +3325,56 @@ impl Engine {
     /// reverse) merely by changing its process configuration. An old layout-5
     /// versioned store obtains this row during its validated layout-6 open;
     /// that migration is additive and never deletes historical rows.
-    fn ensure_durable_versioning_policy(
+    fn validated_versioning_policy(
         storage: &sema::Sema,
         requested: Option<&VersioningPolicy>,
-    ) -> Result<()> {
+    ) -> Result<Option<VersioningPolicy>> {
         let recorded = storage
             .read(|transaction| VERSIONING_POLICY.get(transaction, VERSIONING_POLICY_KEY))?;
         match (recorded, requested) {
             (Some(_), None) => Err(Error::VersioningPolicyRequired),
-            (Some(recorded), Some(requested)) if recorded == *requested => Ok(()),
+            (Some(recorded), Some(requested)) if recorded == *requested => Ok(None),
             (Some(_), Some(_)) => Err(Error::VersioningPolicyMismatch),
-            (None, None) => Ok(()),
-            (None, Some(requested)) => Ok(storage.write(|transaction| {
-                VERSIONING_POLICY.insert(transaction, VERSIONING_POLICY_KEY, requested)
-            })?),
+            (None, None) => Ok(None),
+            (None, Some(requested)) => Ok(Some(requested.clone())),
         }
     }
 
-    fn family_registration_state(&self, identity: &FamilyIdentity) -> Result<FamilyRegistration> {
-        if let Some(stored) = self
-            .catalog
-            .registrations()
-            .iter()
-            .find(|registration| registration.table_name() == identity.table_name())
-        {
-            if stored.identity() != identity {
-                return Err(Error::FamilyIdentityMismatch {
-                    table: identity.table_name().to_owned(),
-                    stored: stored.identity().to_string(),
-                    declared: identity.to_string(),
-                });
+    /// Land the whole durable effect of an open in one write transaction:
+    /// the layout plan, the first versioning-policy row, and the declared
+    /// families new to the catalog (with an identified family's counter).
+    /// A crash or failure anywhere inside leaves none of it.
+    fn persist_open(
+        storage: &sema::Sema,
+        plan: &LayoutOpenPlan,
+        policy: Option<&VersioningPolicy>,
+        families: &[(FamilyKeying, TableName, TableRegistration)],
+        fault: Option<OpenFault>,
+    ) -> Result<()> {
+        Ok(storage.write(|transaction| {
+            Self::apply_layout_plan(transaction, plan)?;
+            if let Some(fault @ OpenFault::AfterLayoutStamped) = fault {
+                return Err(Error::OpenInterrupted { fault }.into_storage());
             }
-            return Ok(FamilyRegistration::Existing);
-        }
-        if let Some(bound) = self.catalog.registration_for_family(identity) {
-            return Err(Error::FamilyAlreadyBound {
-                family: identity.family().as_str().to_owned(),
-                existing: bound.table_name().to_owned(),
-                table: identity.table_name().to_owned(),
-            });
-        }
-        Ok(FamilyRegistration::New(TableRegistration::new(
-            identity.clone(),
-        )))
+            if let Some(policy) = policy {
+                VERSIONING_POLICY.insert(transaction, VERSIONING_POLICY_KEY, policy)?;
+            }
+            for (keying, table, registration) in families {
+                CATALOG.insert(transaction, table.as_str(), registration)?;
+                if let FamilyKeying::Identified = keying {
+                    IDENTIFIED_COUNTERS.insert(
+                        transaction,
+                        table.identified_counter_key(),
+                        &RecordIdentifier::first().value(),
+                    )?;
+                }
+            }
+            Ok(())
+        })?)
+    }
+
+    fn family_registration_state(&self, identity: &FamilyIdentity) -> Result<FamilyRegistration> {
+        self.catalog.registration_state(identity)
     }
 
     fn registered_family(&self, name: &TableName) -> Result<FamilyIdentity> {
@@ -3743,11 +3767,6 @@ impl Engine {
 /// Outcome of validating a family declaration against the persisted
 /// catalog: the binding already exists with the same identity, or it
 /// is new and carries the registration to persist.
-enum FamilyRegistration {
-    Existing,
-    New(TableRegistration),
-}
-
 /// The open-time storage-layout plan: what an open must do to the store
 /// after every read-only validation has passed. Decided before any
 /// write so a rejected open never mutates the store it rejects.
@@ -3756,9 +3775,10 @@ enum LayoutOpenPlan {
     Current,
     /// A virgin store with no engine history: stamp the layout slot.
     StampFresh,
-    /// An older versioned store: refold the layout-introduced derived
-    /// slots from its complete log and re-stamp to the current layout.
-    RebuildDerivedSlots,
+    /// An older versioned store: the layout-introduced derived slots,
+    /// already refolded and verified from its complete log, to write
+    /// beside the re-stamped current layout.
+    RebuildDerivedSlots(DerivedSlots),
 }
 
 /// Read-only handle over the engine's storage kernel for transitional
@@ -3802,40 +3822,6 @@ impl<RecordValue> CommittedEffect<RecordValue> {
 
     fn record(&self) -> &RecordValue {
         &self.record
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct EngineOpen {
-    path: PathBuf,
-    schema: Schema,
-    versioning_policy: Option<VersioningPolicy>,
-}
-
-impl EngineOpen {
-    pub fn new(path: impl Into<PathBuf>, version: SchemaVersion) -> Self {
-        Self {
-            path: path.into(),
-            schema: Schema { version },
-            versioning_policy: None,
-        }
-    }
-
-    pub fn with_versioning(mut self, policy: VersioningPolicy) -> Self {
-        self.versioning_policy = Some(policy);
-        self
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    pub fn versioning_policy(&self) -> Option<&VersioningPolicy> {
-        self.versioning_policy.as_ref()
     }
 }
 

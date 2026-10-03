@@ -272,6 +272,14 @@ impl<RecordValue> TableDescriptor<RecordValue> {
     /// per-family schema hash. A stored identity from a different
     /// family never matches — a table coordinate reused by another
     /// family is a genuine incompatibility, not an evolution.
+    /// The per-family schema hashes of every declared prior generation.
+    pub fn prior_schema_hashes(&self) -> Vec<SchemaHash> {
+        self.evolution
+            .iter()
+            .map(EvolutionStep::prior_schema_hash)
+            .collect()
+    }
+
     pub(crate) fn evolution_step_for(
         &self,
         stored: &FamilyIdentity,

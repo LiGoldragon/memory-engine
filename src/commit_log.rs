@@ -242,11 +242,7 @@ impl<'engine> CommitLog<'engine> {
     /// only the derived slots and needs no family directory — the head
     /// and the counts derive from the raw log alone, before any
     /// component family-to-table registration.
-    pub(crate) fn rebuild_derived_slots(
-        storage: &sema::Sema,
-        layout_key: &'static str,
-        layout: u64,
-    ) -> Result<()> {
+    pub(crate) fn refolded_derived_slots(storage: &sema::Sema) -> Result<DerivedSlots> {
         let entries: Vec<VersionedCommitLogEntry> = storage
             .read(|transaction| VERSIONED_COMMIT_LOG.iter(transaction))?
             .into_iter()
@@ -256,24 +252,14 @@ impl<'engine> CommitLog<'engine> {
         // or forked log surfaces as a typed VersionedChainBroken here,
         // aborting the open before any derived slot is written.
         crate::fold::CanonicalView::fold(&[], &entries, None)?;
-        let head = entries.last().map(VersionedCommitLogEntry::entry_digest);
-        let versioned_count = entries.len() as u64;
         let commit_count = storage
             .read(|transaction| COMMIT_LOG.iter(transaction))?
             .len() as u64;
-        Ok(storage.write(|transaction| {
-            match &head {
-                Some(digest) => {
-                    CHAIN_HEAD.insert(transaction, LATEST_ENTRY_DIGEST_KEY, digest)?;
-                }
-                None => {
-                    CHAIN_HEAD.remove(transaction, LATEST_ENTRY_DIGEST_KEY)?;
-                }
-            }
-            COUNTERS.insert(transaction, COMMIT_LOG_COUNT_KEY, &commit_count)?;
-            COUNTERS.insert(transaction, VERSIONED_LOG_COUNT_KEY, &versioned_count)?;
-            COUNTERS.insert(transaction, layout_key, &layout)
-        })?)
+        Ok(DerivedSlots {
+            head: entries.last().map(VersionedCommitLogEntry::entry_digest),
+            versioned_count: entries.len() as u64,
+            commit_count,
+        })
     }
 
     /// Whether the versioned log holds any entry — the open-time test
@@ -330,5 +316,35 @@ impl LogCounts {
             self.commits.saturating_sub(commits as u64),
             self.versioned.saturating_sub(versioned as u64),
         )
+    }
+}
+
+/// The layout-introduced derived slots, refolded and verified from a
+/// store's complete versioned log, waiting to land in the open's one
+/// write transaction beside the re-stamped layout.
+pub(crate) struct DerivedSlots {
+    head: Option<EntryDigest>,
+    versioned_count: u64,
+    commit_count: u64,
+}
+
+impl DerivedSlots {
+    pub(crate) fn write(
+        &self,
+        transaction: &sema::WriteTransaction,
+        layout_key: &'static str,
+        layout: u64,
+    ) -> sema::Result<()> {
+        match &self.head {
+            Some(digest) => {
+                CHAIN_HEAD.insert(transaction, LATEST_ENTRY_DIGEST_KEY, digest)?;
+            }
+            None => {
+                CHAIN_HEAD.remove(transaction, LATEST_ENTRY_DIGEST_KEY)?;
+            }
+        }
+        COUNTERS.insert(transaction, COMMIT_LOG_COUNT_KEY, &self.commit_count)?;
+        COUNTERS.insert(transaction, VERSIONED_LOG_COUNT_KEY, &self.versioned_count)?;
+        COUNTERS.insert(transaction, layout_key, &layout)
     }
 }

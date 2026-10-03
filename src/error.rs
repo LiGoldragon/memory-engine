@@ -226,6 +226,9 @@ pub enum Error {
     #[error("deterministic compaction interruption after {phase}")]
     CompactionInterrupted { phase: &'static str },
 
+    #[error("deterministic open interruption at {fault:?}")]
+    OpenInterrupted { fault: crate::OpenFault },
+
     #[error("no staging session is engaged; {surface} requires begin_staged_group first")]
     StagingSessionNotEngaged { surface: &'static str },
 
