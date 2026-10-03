@@ -9,8 +9,9 @@ use std::path::PathBuf;
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use sema_engine::{
-    Engine, EngineOpen, EngineRecord, Error, FamilyName, OpenFault, RecordKey, SchemaHash,
-    SchemaVersion, TableDescriptor, TableName, TableRegistration, VersionedStoreName,
+    Decision, Engine, EngineOpen, EngineRecord, Error, FamilyName, MemoryDefinition,
+    MemoryUpgrades, MemoryVersion, OpenFault, RecordKey, SchemaHash, SchemaVersion,
+    TableDescriptor, TableName, TableRegistration, UpgradeFrom, UpgradeOutcome, VersionedStoreName,
     VersioningPolicy,
 };
 use tempfile::TempDir;
@@ -33,6 +34,41 @@ struct Note {
 impl EngineRecord for Note {
     fn record_key(&self) -> RecordKey {
         RecordKey::new(self.key.clone())
+    }
+}
+
+impl MemoryDefinition for Note {
+    fn memory_version() -> MemoryVersion {
+        MemoryVersion::new(1)
+    }
+
+    fn schema_hash() -> SchemaHash {
+        SchemaHash::for_label("note-v1")
+    }
+}
+
+/// The byte-compatible second definition of `Note`.
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+#[rkyv(derive(Debug))]
+struct NoteV2 {
+    key: String,
+}
+
+impl MemoryDefinition for NoteV2 {
+    fn memory_version() -> MemoryVersion {
+        MemoryVersion::new(2)
+    }
+
+    fn schema_hash() -> SchemaHash {
+        SchemaHash::for_label("note-v2")
+    }
+}
+
+impl UpgradeFrom<Note> for NoteV2 {
+    type Refusal = std::convert::Infallible;
+
+    fn upgrade_from(note: Note) -> Decision<Self, Self::Refusal> {
+        Decision::Ready(NoteV2 { key: note.key })
     }
 }
 
@@ -199,10 +235,17 @@ fn a_declared_family_evolving_from_the_stored_generation_opens() {
         .expect("v1 registers");
     drop(engine);
 
-    let evolving = store
-        .notes("note-v2")
-        .with_prior(SchemaHash::for_label("note-v1"), |prior: Note| prior);
+    let evolving = TableDescriptor::<NoteV2>::new(
+        TableName::new("notes"),
+        FamilyName::new("note"),
+        NoteV2::schema_hash(),
+    )
+    .with_predecessor::<Note>();
     let mut engine =
         Engine::open(store.request().with_family(&evolving)).expect("a declared prior opens");
-    engine.register_table(evolving).expect("v2 evolves from v1");
+    let outcome = engine.upgrade_table::<Note, NoteV2>(evolving);
+    assert!(
+        matches!(outcome, UpgradeOutcome::Upgraded(_)),
+        "v2 upgrades from v1, got {outcome:?}"
+    );
 }

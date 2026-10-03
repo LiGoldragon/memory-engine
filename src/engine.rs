@@ -30,7 +30,7 @@ use crate::staging::{
 };
 use crate::subscribe::{ActiveSubscription, SubscriptionRegistry};
 use crate::{
-    Catalog, CommitRequest, DeltaKind, EngineStoredRecord, EngineStoredValue, Error, EvolutionStep,
+    Catalog, CommitRequest, DeltaKind, EngineStoredRecord, EngineStoredValue, Error,
     FamilyIdentity, IdentifiedAssertion, IdentifiedMutation, IdentifiedMutationReceipt,
     IdentifiedQueryPlan, IdentifiedQuerySnapshot, IdentifiedRecord, IdentifiedRetraction,
     IdentifiedTableDescriptor, IdentifiedTableReference, InitialSnapshot, KeyedAssertion,
@@ -84,7 +84,7 @@ const COMPACTION_INTENT_KEY: &str = "pending";
 
 pub struct Engine {
     pub(crate) storage: sema::Sema,
-    catalog: Catalog,
+    pub(crate) catalog: Catalog,
     pub(crate) subscriptions: SubscriptionRegistry,
     pub(crate) versioning_policy: Option<VersioningPolicy>,
     /// Serializes the engine's own read-compute-write path so two
@@ -110,6 +110,8 @@ pub struct Engine {
     /// Test-only interruption is an engine-owned typed hook rather than a
     /// process-global environment switch, making restart recovery deterministic.
     compaction_fault: std::sync::Mutex<Option<CompactionFault>>,
+    /// Test-only interruption of the next upgrade's durable write.
+    pub(crate) upgrade_fault: std::sync::Mutex<Option<crate::UpgradeFault>>,
 }
 
 impl Engine {
@@ -186,6 +188,7 @@ impl Engine {
             write_lock: std::sync::Mutex::new(()),
             staging: std::sync::Mutex::new(None),
             compaction_fault: std::sync::Mutex::new(None),
+            upgrade_fault: std::sync::Mutex::new(None),
         })
     }
 
@@ -210,76 +213,46 @@ impl Engine {
                 self.catalog.insert(registration)?;
             }
             Err(mismatch @ Error::FamilyIdentityMismatch { .. }) => {
-                // The catalog names a different identity at this table.
-                // A declared prior generation of the same family evolves
-                // in place; anything else keeps failing closed with the
-                // original mismatch.
+                // The catalog names a different identity at this table. A
+                // declared predecessor stays closed until its typed upgrade
+                // lands; anything else fails with the original mismatch.
                 let stored = self.registered_family(&name)?;
-                let Some(step) = descriptor.evolution_step_for(&stored).cloned() else {
+                let Some(edge) = descriptor.edge_from(&stored) else {
                     return Err(mismatch);
                 };
-                self.evolve_registered_family(&descriptor, stored, &step)?;
+                return Err(Error::UpgradePending {
+                    table: name.as_str().to_owned(),
+                    predecessor: edge.predecessor().version(),
+                    current: edge.current().version(),
+                });
             }
             Err(other) => return Err(other),
         }
         Ok(TableReference::new(name))
     }
 
-    /// Migrate a registered family in place across a schema-identity
-    /// bump: read every row in its stored prior shape through the
-    /// declared evolution step, then land the rewritten rows, the
-    /// evolved catalog registration, and the log entries in one write
-    /// transaction — the catalog can never name a shape the rows do
-    /// not have.
+    /// Land an upgraded family: the converted rows, the upgraded catalog
+    /// registration (the family's format marker), and the log entries in
+    /// one write transaction — the catalog can never name a shape the rows
+    /// do not have.
     ///
-    /// The versioned log records the evolution as row history: one
-    /// entry retracting each row under the prior family identity and
-    /// asserting its converted successor under the evolved identity,
-    /// so a canonical-view fold or rebuild materializes only
-    /// current-shape rows and never needs the retired shape. An empty
-    /// family evolves as a catalog-only rewrite — there are no rows to
-    /// carry and nothing material to log, matching plain registration,
-    /// which also writes no log entry.
+    /// The versioned log records the upgrade as row history: one entry
+    /// retracting each row under the predecessor family identity and
+    /// asserting its converted successor under the current identity, so a
+    /// canonical-view fold or rebuild materializes only current-shape rows
+    /// and never needs the retired shape. An empty family upgrades as a
+    /// catalog-only rewrite — there are no rows to carry and nothing
+    /// material to log, matching plain registration.
     ///
-    /// Registration happens at daemon startup, before any subscription
-    /// can exist, so no deltas are delivered for the carried rows.
-    fn evolve_registered_family<RecordValue>(
-        &mut self,
-        descriptor: &TableDescriptor<RecordValue>,
-        stored: FamilyIdentity,
-        step: &EvolutionStep<RecordValue>,
-    ) -> Result<()>
-    where
-        RecordValue: EngineStoredValue + Send + Sync + 'static,
-        <RecordValue as rkyv::Archive>::Archived: rkyv::Deserialize<RecordValue, HighDeserializer<rancor::Error>>
-            + for<'validation> CheckBytes<
-                Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
-            >,
-    {
-        let name = *descriptor.name();
-        let carried = self
-            .storage
-            .read(|transaction| step.carry_rows(transaction, name))?;
-        // The in-memory catalog evolves first so the store schema hash
-        // stamped into the versioned entry names the evolved inventory;
-        // a failed persist restores it, keeping memory equal to disk.
-        let previous = TableRegistration::new(stored.clone());
-        let evolved = TableRegistration::new(descriptor.family_identity());
-        self.catalog.evolve(name.as_str(), evolved.clone())?;
-        let persisted = self.persist_family_evolution(descriptor, &stored, &carried, &evolved);
-        if persisted.is_err() {
-            self.catalog.evolve(name.as_str(), previous)?;
-        }
-        persisted
-    }
-
-    fn persist_family_evolution<RecordValue>(
+    /// Upgrade happens at daemon startup, before any subscription can
+    /// exist, so no deltas are delivered for the carried rows.
+    pub(crate) fn persist_family_evolution<RecordValue>(
         &self,
         descriptor: &TableDescriptor<RecordValue>,
         stored: &FamilyIdentity,
         carried: &[(String, RecordValue)],
         evolved: &TableRegistration,
-    ) -> Result<()>
+    ) -> Result<Option<crate::CommitSequence>>
     where
         RecordValue: EngineStoredValue + Send + Sync + 'static,
         <RecordValue as rkyv::Archive>::Archived: rkyv::Deserialize<RecordValue, HighDeserializer<rancor::Error>>
@@ -288,10 +261,15 @@ impl Engine {
             >,
     {
         let name = *descriptor.name();
+        let fault = self.take_upgrade_fault();
         if carried.is_empty() {
-            return Ok(self
-                .storage
-                .write(|transaction| CATALOG.insert(transaction, name.as_str(), evolved))?);
+            self.storage.write(|transaction| {
+                if let Some(fault) = fault {
+                    return Err(Error::UpgradeInterrupted { fault }.into_storage());
+                }
+                CATALOG.insert(transaction, name.as_str(), evolved)
+            })?;
+            return Ok(None);
         }
         let evolved_identity = evolved.identity().clone();
         let mut log_operations = Vec::with_capacity(carried.len() * 2);
@@ -357,6 +335,9 @@ impl Engine {
                     row,
                 )?;
             }
+            if let Some(fault) = fault {
+                return Err(Error::UpgradeInterrupted { fault }.into_storage());
+            }
             CommitLog::append_commit(transaction, &entry, counts.next_commit())?;
             self.insert_versioned_entry(transaction, &versioned_entry, counts.next_versioned())?;
             COUNTERS.insert(
@@ -368,7 +349,8 @@ impl Engine {
             CATALOG.insert(transaction, name.as_str(), evolved)?;
             Ok(())
         })?;
-        self.maintain_versioned_history()
+        self.maintain_versioned_history()?;
+        Ok(Some(commit_sequence))
     }
 
     pub fn register_identified_table<RecordValue>(
@@ -3373,11 +3355,14 @@ impl Engine {
         })?)
     }
 
-    fn family_registration_state(&self, identity: &FamilyIdentity) -> Result<FamilyRegistration> {
+    pub(crate) fn family_registration_state(
+        &self,
+        identity: &FamilyIdentity,
+    ) -> Result<FamilyRegistration> {
         self.catalog.registration_state(identity)
     }
 
-    fn registered_family(&self, name: &TableName) -> Result<FamilyIdentity> {
+    pub(crate) fn registered_family(&self, name: &TableName) -> Result<FamilyIdentity> {
         self.catalog
             .family_identity(name)
             .cloned()

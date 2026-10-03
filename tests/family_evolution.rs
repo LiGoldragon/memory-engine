@@ -1,16 +1,20 @@
-//! Witnesses for the family-evolution primitive: a table descriptor
-//! declares its prior stored shapes, and registration against a store
-//! whose catalog names a declared prior migrates the rows through the
-//! engine — atomically with the catalog rewrite, logged as row
-//! history, fail-closed for any undeclared identity.
+//! Witnesses for family evolution through the typed upgrade: a table
+//! descriptor names its predecessor definitions, and upgrading a store
+//! whose catalog names a declared predecessor migrates the rows through
+//! the record's authored `UpgradeFrom` — atomically with the catalog
+//! rewrite, logged as row history, fail-closed for any undeclared
+//! identity.
 
+use std::convert::Infallible;
 use std::path::PathBuf;
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use sema_engine::{
-    Assertion, Engine, EngineOpen, EngineRecord, Error, FamilyName, QueryPlan, RecordKey,
-    SchemaHash, SchemaVersion, TableDescriptor, TableName, VersionedHistoryAcknowledgement,
-    VersionedHistoryRetention, VersionedPayload, VersionedStoreName, VersioningPolicy,
+    Assertion, Decision, Engine, EngineOpen, EngineRecord, Error, FamilyName, MemoryDefinition,
+    MemoryUpgrades, MemoryVersion, QueryPlan, RecordKey, SchemaHash, SchemaVersion, StoragePhase,
+    TableDescriptor, TableName, TableReference, UpgradeFrom, UpgradeOutcome,
+    VersionedHistoryAcknowledgement, VersionedHistoryRetention, VersionedPayload,
+    VersionedStoreName, VersioningPolicy,
 };
 use signal_sema::SemaOperation;
 use tempfile::TempDir;
@@ -32,13 +36,15 @@ impl ThoughtV1 {
             body: body.into(),
         }
     }
+}
 
-    fn into_current(self) -> Thought {
-        Thought {
-            key: self.key,
-            body: self.body,
-            mood: String::from("carried"),
-        }
+impl MemoryDefinition for ThoughtV1 {
+    fn memory_version() -> MemoryVersion {
+        MemoryVersion::new(1)
+    }
+
+    fn schema_hash() -> SchemaHash {
+        SchemaHash::for_label("thought-v1")
     }
 }
 
@@ -73,6 +79,81 @@ impl EngineRecord for Thought {
     }
 }
 
+impl MemoryDefinition for Thought {
+    fn memory_version() -> MemoryVersion {
+        MemoryVersion::new(2)
+    }
+
+    fn schema_hash() -> SchemaHash {
+        SchemaHash::for_label("thought-v2")
+    }
+}
+
+impl UpgradeFrom<ThoughtV1> for Thought {
+    type Refusal = Infallible;
+
+    fn upgrade_from(predecessor: ThoughtV1) -> Decision<Self, Infallible> {
+        Decision::Ready(Thought {
+            key: predecessor.key,
+            body: predecessor.body,
+            mood: String::from("carried"),
+        })
+    }
+}
+
+/// A conversion that would reinterpret v1 bytes as an incompatible shape.
+impl UpgradeFrom<CountedThought> for Thought {
+    type Refusal = Infallible;
+
+    fn upgrade_from(counted: CountedThought) -> Decision<Self, Infallible> {
+        Decision::Ready(Thought::new(counted.key, "reinterpreted", "never"))
+    }
+}
+
+/// A third generation, byte-compatible with `Thought`, reached directly
+/// from either earlier generation through its own declared edge.
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+#[rkyv(derive(Debug))]
+struct ThoughtV3 {
+    key: String,
+    body: String,
+    mood: String,
+}
+
+impl MemoryDefinition for ThoughtV3 {
+    fn memory_version() -> MemoryVersion {
+        MemoryVersion::new(3)
+    }
+
+    fn schema_hash() -> SchemaHash {
+        SchemaHash::for_label("thought-v3")
+    }
+}
+
+impl UpgradeFrom<ThoughtV1> for ThoughtV3 {
+    type Refusal = Infallible;
+
+    fn upgrade_from(predecessor: ThoughtV1) -> Decision<Self, Infallible> {
+        Decision::Ready(ThoughtV3 {
+            key: predecessor.key,
+            body: predecessor.body,
+            mood: String::from("carried"),
+        })
+    }
+}
+
+impl UpgradeFrom<Thought> for ThoughtV3 {
+    type Refusal = Infallible;
+
+    fn upgrade_from(predecessor: Thought) -> Decision<Self, Infallible> {
+        Decision::Ready(ThoughtV3 {
+            key: predecessor.key,
+            body: predecessor.body,
+            mood: predecessor.mood,
+        })
+    }
+}
+
 /// A shape whose field layout is incompatible with `ThoughtV1` bytes,
 /// for the fail-closed decode witness.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -87,6 +168,16 @@ struct CountedThought {
 impl EngineRecord for CountedThought {
     fn record_key(&self) -> RecordKey {
         RecordKey::new(self.key.clone())
+    }
+}
+
+impl MemoryDefinition for CountedThought {
+    fn memory_version() -> MemoryVersion {
+        MemoryVersion::new(1)
+    }
+
+    fn schema_hash() -> SchemaHash {
+        SchemaHash::for_label("thought-v1")
     }
 }
 
@@ -139,7 +230,16 @@ impl Fixture {
 
     fn descriptor_v2_with_prior(&self) -> TableDescriptor<Thought> {
         TableDescriptor::new(THOUGHTS, self.family(), self.hash_v2())
-            .with_prior::<ThoughtV1>(self.hash_v1(), ThoughtV1::into_current)
+            .with_predecessor::<ThoughtV1>()
+    }
+
+    /// Upgrade the v1 family to v2 through its declared edge.
+    fn upgrade(&self, engine: &mut Engine) -> TableReference<Thought> {
+        match engine.upgrade_table::<ThoughtV1, Thought>(self.descriptor_v2_with_prior()) {
+            UpgradeOutcome::Upgraded(receipt) => receipt.table(),
+            UpgradeOutcome::AlreadyCurrent(table) => table,
+            other => panic!("the v1 family upgrades, got {other:?}"),
+        }
     }
 
     fn seed_v1(&self, engine: &mut Engine, rows: &[ThoughtV1]) {
@@ -168,9 +268,7 @@ fn evolution_carries_rows_across_a_family_identity_bump() {
     drop(engine);
 
     let mut evolved = fixture.open_plain("carried");
-    let table = evolved
-        .register_table(fixture.descriptor_v2_with_prior())
-        .expect("evolution registers the v2 family");
+    let table = fixture.upgrade(&mut evolved);
     let mut rows = evolved
         .match_records(QueryPlan::all(table))
         .expect("current rows read")
@@ -194,9 +292,7 @@ fn evolved_store_reopens_as_existing_registration() {
     drop(engine);
 
     let mut evolved = fixture.open_plain("reopens");
-    evolved
-        .register_table(fixture.descriptor_v2_with_prior())
-        .expect("evolution registers");
+    fixture.upgrade(&mut evolved);
     drop(evolved);
 
     // The second open under the evolved identity is an ordinary
@@ -253,11 +349,18 @@ fn another_family_at_the_same_table_is_not_evolvable() {
     // Same table coordinate, different family name, matching prior
     // hash: a reused coordinate is a genuine incompatibility.
     let mut foreign = fixture.open_plain("foreign");
-    let outcome = foreign.register_table(
+    let outcome = foreign.upgrade_table::<ThoughtV1, Thought>(
         TableDescriptor::<Thought>::new(THOUGHTS, FamilyName::new("memo"), fixture.hash_v2())
-            .with_prior::<ThoughtV1>(fixture.hash_v1(), ThoughtV1::into_current),
+            .with_predecessor::<ThoughtV1>(),
     );
-    assert!(matches!(outcome, Err(Error::FamilyIdentityMismatch { .. })));
+    let UpgradeOutcome::Failed(failure) = outcome else {
+        panic!("a foreign family does not upgrade, got {outcome:?}");
+    };
+    assert_eq!(failure.phase(), StoragePhase::Admission);
+    assert!(matches!(
+        failure.cause(),
+        Error::FamilyIdentityMismatch { .. }
+    ));
 }
 
 #[test]
@@ -271,9 +374,13 @@ fn empty_family_evolves_as_catalog_only_rewrite() {
 
     let mut evolved = fixture.open_plain("empty");
     let before = evolved.commit_log().expect("commit log reads").len();
-    let table = evolved
-        .register_table(fixture.descriptor_v2_with_prior())
-        .expect("empty family evolves");
+    let outcome = evolved.upgrade_table::<ThoughtV1, Thought>(fixture.descriptor_v2_with_prior());
+    let UpgradeOutcome::Upgraded(receipt) = outcome else {
+        panic!("the empty family upgrades, got {outcome:?}");
+    };
+    assert_eq!(receipt.rows(), 0);
+    assert_eq!(receipt.commit_sequence(), None);
+    let table = receipt.table();
     let after = evolved.commit_log().expect("commit log reads").len();
     assert_eq!(before, after, "an empty evolution logs no commit entry");
     let rows = evolved.match_records(QueryPlan::all(table)).expect("reads");
@@ -290,13 +397,14 @@ fn a_prior_that_does_not_decode_fails_and_leaves_the_store_intact() {
     // The declared prior shape does not match the stored bytes: the
     // validated decode refuses, and nothing changes.
     let mut wrong = fixture.open_plain("intact");
-    let outcome = wrong.register_table(
+    let outcome = wrong.upgrade_table::<CountedThought, Thought>(
         TableDescriptor::<Thought>::new(THOUGHTS, fixture.family(), fixture.hash_v2())
-            .with_prior::<CountedThought>(fixture.hash_v1(), |counted| {
-            Thought::new(counted.key, "reinterpreted", "never")
-        }),
+            .with_predecessor::<CountedThought>(),
     );
-    assert!(outcome.is_err(), "mismatched prior bytes must refuse");
+    let UpgradeOutcome::Failed(failure) = outcome else {
+        panic!("mismatched predecessor bytes must fail, got {outcome:?}");
+    };
+    assert_eq!(failure.phase(), StoragePhase::Read);
     drop(wrong);
 
     let mut untouched = fixture.open_plain("intact");
@@ -318,26 +426,36 @@ fn two_declared_generations_each_evolve_directly() {
 
     // A store parked at v1 and a store parked at v2 both land on v3
     // through their own declared step.
-    let hash_v3 = SchemaHash::for_label("thought-v3");
     let descriptor_v3 = || {
-        TableDescriptor::<Thought>::new(THOUGHTS, FamilyName::new("thought"), hash_v3)
-            .with_prior::<ThoughtV1>(SchemaHash::for_label("thought-v1"), ThoughtV1::into_current)
-            .with_prior::<Thought>(SchemaHash::for_label("thought-v2"), |thought| thought)
+        TableDescriptor::<ThoughtV3>::new(
+            THOUGHTS,
+            FamilyName::new("thought"),
+            ThoughtV3::schema_hash(),
+        )
+        .with_predecessor::<ThoughtV1>()
+        .with_predecessor::<Thought>()
+    };
+    let landed = |outcome: UpgradeOutcome<ThoughtV3, Infallible>| match outcome {
+        UpgradeOutcome::Upgraded(receipt) => receipt.table(),
+        other => panic!("the store upgrades to v3, got {other:?}"),
+    };
+    let v3 = |key: &str, body: &str, mood: &str| ThoughtV3 {
+        key: key.to_owned(),
+        body: body.to_owned(),
+        mood: mood.to_owned(),
     };
 
     let mut at_v1 = fixture.open_plain("ladder-v1");
     fixture.seed_v1(&mut at_v1, &[ThoughtV1::new("alpha", "first")]);
     drop(at_v1);
     let mut evolved_v1 = fixture.open_plain("ladder-v1");
-    let table = evolved_v1
-        .register_table(descriptor_v3())
-        .expect("v1 store evolves to v3");
+    let table = landed(evolved_v1.upgrade_table::<ThoughtV1, ThoughtV3>(descriptor_v3()));
     assert_eq!(
         evolved_v1
             .match_records(QueryPlan::all(table))
             .expect("reads")
             .records(),
-        &[Thought::new("alpha", "first", "carried")],
+        &[v3("alpha", "first", "carried")],
     );
 
     let mut at_v2 = fixture.open_plain("ladder-v2");
@@ -356,15 +474,13 @@ fn two_declared_generations_each_evolve_directly() {
         .expect("v2 row asserts");
     drop(at_v2);
     let mut evolved_v2 = fixture.open_plain("ladder-v2");
-    let table = evolved_v2
-        .register_table(descriptor_v3())
-        .expect("v2 store evolves to v3");
+    let table = landed(evolved_v2.upgrade_table::<Thought, ThoughtV3>(descriptor_v3()));
     assert_eq!(
         evolved_v2
             .match_records(QueryPlan::all(table))
             .expect("reads")
             .records(),
-        &[Thought::new("beta", "second", "byte-compatible")],
+        &[v3("beta", "second", "byte-compatible")],
     );
 }
 
@@ -376,9 +492,7 @@ fn versioned_evolution_logs_retraction_and_assertion_as_row_history() {
     drop(engine);
 
     let mut evolved = fixture.open_versioned("logged");
-    evolved
-        .register_table(fixture.descriptor_v2_with_prior())
-        .expect("versioned store evolves");
+    fixture.upgrade(&mut evolved);
     let log = evolved.versioned_commit_log().expect("versioned log reads");
     let evolution_entry = log.last().expect("evolution entry exists");
 
@@ -415,9 +529,7 @@ fn evolved_versioned_store_checkpoints_and_compacts_over_retired_identities() {
         );
     }
     let mut engine = fixture.open_versioned("evolved-compaction");
-    let table = engine
-        .register_table(fixture.descriptor_v2_with_prior())
-        .expect("family evolves");
+    let table = fixture.upgrade(&mut engine);
     let compacted = engine
         .compact_versioned_history(
             VersionedHistoryRetention::new(0),

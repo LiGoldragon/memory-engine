@@ -93,8 +93,9 @@ pub enum FamilyKeying {
 }
 
 /// One record family as an open declares it: the identity it registers
-/// under, how its rows are keyed, and the prior schema hashes it knows how
-/// to evolve from (a stored prior is left for `register_table` to evolve).
+/// under, how its rows are keyed, and the schema hashes of the predecessor
+/// definitions it upgrades from (a stored predecessor is left for
+/// `MemoryUpgrades::upgrade_table` to upgrade).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FamilyDeclaration {
     table: TableName,
@@ -130,8 +131,8 @@ impl FamilyDeclaration {
         self.keying
     }
 
-    /// Whether a stored identity at this family's table is a prior
-    /// generation this declaration evolves from.
+    /// Whether a stored identity at this family's table is a predecessor
+    /// definition this declaration upgrades from.
     pub fn evolves_from(&self, stored: &FamilyIdentity) -> bool {
         stored.family() == self.identity.family() && self.priors.contains(&stored.schema_hash())
     }
@@ -148,7 +149,7 @@ impl<RecordValue> DeclaresFamily for TableDescriptor<RecordValue> {
             *self.name(),
             self.family_identity(),
             FamilyKeying::Domain,
-            self.prior_schema_hashes(),
+            self.predecessor_schema_hashes(),
         )
     }
 }
