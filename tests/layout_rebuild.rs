@@ -28,11 +28,12 @@ use tempfile::TempDir;
 /// The engine-internal counters table, reconstructed by name so a test
 /// can read and rewrite the layout slot and the derived counters
 /// exactly as an old store's on-disk shape would have them.
-const COUNTERS: memory::Table<&'static str, u64> = memory::Table::new("__memory_engine_counters");
+const COUNTERS: ::memory::Table<&'static str, u64> =
+    ::memory::Table::new("__memory_engine_counters");
 /// The engine-internal chain-head slot, reconstructed by name so a test
 /// can delete it to simulate a pre-layout-5 store.
-const CHAIN_HEAD: memory::Table<&'static str, EntryDigest> =
-    memory::Table::new("__memory_engine_chain_head");
+const CHAIN_HEAD: ::memory::Table<&'static str, EntryDigest> =
+    ::memory::Table::new("__memory_engine_chain_head");
 const STORAGE_LAYOUT_KEY: &str = "engine_storage_layout";
 const LATEST_ENTRY_DIGEST_KEY: &str = "latest_entry_digest";
 const COMMIT_LOG_COUNT_KEY: &str = "commit_log_count";
@@ -121,11 +122,12 @@ impl Fixture {
     /// Open the kernel directly over a store's file — the affordance an
     /// old-store simulation needs to rewrite the layout slot and the
     /// derived slots that a pre-layout-5 store would not have carried.
-    fn open_kernel(&self, name: &str) -> memory::Memory {
-        let schema = memory::Schema {
+    fn open_kernel(&self, name: &str) -> ::memory::Memory {
+        let schema = ::memory::Schema {
             version: SchemaVersion::new(1),
         };
-        memory::Memory::open_with_schema(&self.database_path(name), &schema).expect("kernel opens")
+        ::memory::Memory::open_with_schema(&self.database_path(name), &schema)
+            .expect("kernel opens")
     }
 }
 

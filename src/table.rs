@@ -10,7 +10,7 @@ use crate::{
 /// restores the exact counter keys the original engine wrote.
 pub(crate) const IDENTIFIED_COUNTER_SUFFIX: &str = "next_record_identifier";
 
-/// The generated declaration of one domain-keyed Memory table.
+/// The declaration of one domain-keyed Memory table.
 ///
 /// Implementations provide only structural data: the current redb coordinate,
 /// stable family identity, schema identity, stored record type, and authored
@@ -22,7 +22,7 @@ pub trait TableSpecification {
 
     /// The source-declared type that addresses one record.
     ///
-    /// This carries no blanket archive-to-string conversion.  The generated
+    /// This carries no blanket archive-to-string conversion. The
     /// declaration below owns the exact key projection that its source
     /// archive contract declares.
     type Key;
@@ -251,8 +251,8 @@ impl<RecordValue> TableReference<RecordValue> {
         &self.name
     }
 
-    pub fn memory_table(&self) -> memory::Table<String, RecordValue> {
-        memory::Table::new(self.name.as_str())
+    pub fn memory_table(&self) -> ::memory::Table<String, RecordValue> {
+        ::memory::Table::new(self.name.as_str())
     }
 }
 
@@ -268,8 +268,8 @@ impl<RecordValue> IdentifiedTableReference<RecordValue> {
         &self.name
     }
 
-    pub fn memory_table(&self) -> memory::Table<u64, RecordValue> {
-        memory::Table::new(self.name.as_str())
+    pub fn memory_table(&self) -> ::memory::Table<u64, RecordValue> {
+        ::memory::Table::new(self.name.as_str())
     }
 }
 

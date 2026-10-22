@@ -1,6 +1,6 @@
 //! Full typed database engine over the `memory` storage kernel.
 //!
-//! `Engine` composes `memory::Memory` and executes Memory database operations
+//! `Engine` composes `::memory::Memory` and executes Memory database operations
 //! over registered typed record families. Components own daemons,
 //! actors, sockets, authorization, and domain validation; this crate is
 //! only the reusable engine library.
@@ -34,6 +34,16 @@ pub mod subscribe;
 pub mod table;
 pub mod versioning;
 
+pub use crate::memory::{
+    ChangeEffect, ChangeIdentifier, ChangeOutcome, ChangeReceipt, Decision, DeclaredVersion,
+    ManifestEdge, Memorable, MemoryChange, MemoryChanges, MemoryDefinition, MemoryUpgrades,
+    MemoryVersion, StorageFailure, StoragePhase, UpgradeFault, UpgradeFrom, UpgradeOutcome,
+    UpgradeReceipt, UpgradeRefusal,
+};
+pub use ::memory::{
+    Error as StorageKernelError, ReadTransaction as StorageReadTransaction,
+    Result as StorageKernelResult, SchemaVersion, Table as StorageKernelTable,
+};
 pub use atomic::{AtomicCommit, AtomicCommitReceipt};
 pub use catalog::{Catalog, TableRegistration};
 pub use checkpoint::{
@@ -47,16 +57,6 @@ pub use error::{Error, Result};
 pub use fold::{FamilyDirectory, RebuildReceipt, RowMaterializer, ViewDigest, ViewRow};
 pub use import::{ImportReceipt, ImportSession};
 pub use log::{CommitLogEntry, CommitLogOperation};
-pub use memory::{
-    ChangeEffect, ChangeIdentifier, ChangeOutcome, ChangeReceipt, Decision, DeclaredVersion,
-    ManifestEdge, Memorable, MemoryChange, MemoryChanges, MemoryDefinition, MemoryUpgrades,
-    MemoryVersion, StorageFailure, StoragePhase, UpgradeFault, UpgradeFrom, UpgradeOutcome,
-    UpgradeReceipt, UpgradeRefusal,
-};
-pub use memory::{
-    Error as StorageKernelError, ReadTransaction as StorageReadTransaction,
-    Result as StorageKernelResult, SchemaVersion, Table as StorageKernelTable,
-};
 pub use mutation::{
     Assertion, CommitReceipt, CommitRequest, IdentifiedAssertion, IdentifiedMutation,
     IdentifiedMutationReceipt, IdentifiedRetraction, KeyedAssertion, KeyedMutation, Mutation,

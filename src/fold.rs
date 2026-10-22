@@ -421,12 +421,12 @@ pub trait FamilyDirectory {
 /// payload) or remove (tombstone), into the row's own family table —
 /// no general write authority escapes the engine's choke points.
 pub struct RowMaterializer<'transaction> {
-    transaction: &'transaction memory::WriteTransaction,
+    transaction: &'transaction ::memory::WriteTransaction,
     row: ViewRow,
 }
 
 impl<'transaction> RowMaterializer<'transaction> {
-    pub(crate) fn new(transaction: &'transaction memory::WriteTransaction, row: ViewRow) -> Self {
+    pub(crate) fn new(transaction: &'transaction ::memory::WriteTransaction, row: ViewRow) -> Self {
         Self { transaction, row }
     }
 

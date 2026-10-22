@@ -100,7 +100,7 @@ impl MemoryUpgrades for Engine {
             Err(error) => return failed(StoragePhase::Admission, error),
         };
         let predecessors = match self.storage.read(|transaction| {
-            memory::Table::<String, Predecessor>::new(name.as_str()).iter(transaction)
+            ::memory::Table::<String, Predecessor>::new(name.as_str()).iter(transaction)
         }) {
             Ok(rows) => rows,
             Err(error) => return failed(StoragePhase::Read, error.into()),

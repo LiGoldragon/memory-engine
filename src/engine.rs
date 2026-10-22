@@ -42,10 +42,10 @@ use crate::{
     VersionedRecoveryTopology, VersionedReplay, VersioningPolicy, WriteOperation,
 };
 
-const CATALOG: memory::Table<&'static str, TableRegistration> =
-    memory::Table::new("__memory_engine_catalog");
-pub(crate) const COUNTERS: memory::Table<&'static str, u64> =
-    memory::Table::new("__memory_engine_counters");
+const CATALOG: ::memory::Table<&'static str, TableRegistration> =
+    ::memory::Table::new("__memory_engine_catalog");
+pub(crate) const COUNTERS: ::memory::Table<&'static str, u64> =
+    ::memory::Table::new("__memory_engine_counters");
 pub(crate) const LATEST_COMMIT_SEQUENCE_KEY: &str = "latest_commit_sequence";
 pub(crate) const LATEST_SNAPSHOT_KEY: &str = "latest_snapshot";
 const NEXT_SUBSCRIPTION_KEY: &str = "next_subscription";
@@ -67,23 +67,23 @@ const STORAGE_LAYOUT_KEY: &str = "engine_storage_layout";
 const STORAGE_LAYOUT: u64 = 7;
 /// The layout of stores written before the layout slot existed.
 const LAYOUT_BEFORE_SLOT: u64 = 1;
-const SUBSCRIPTIONS: memory::Table<u64, SubscriptionRegistration> =
-    memory::Table::new("__memory_engine_subscriptions");
-const IDENTIFIED_COUNTERS: memory::Table<String, u64> =
-    memory::Table::new("__memory_engine_identified_counters");
-const CHECKPOINTS: memory::Table<u64, CheckpointMetadata> =
-    memory::Table::new("__memory_engine_checkpoints");
-const CHECKPOINT_SEGMENTS: memory::Table<&'static [u8; 32], CheckpointSegment> =
-    memory::Table::new("__memory_engine_checkpoint_segments");
-const VERSIONING_POLICY: memory::Table<&'static str, VersioningPolicy> =
-    memory::Table::new("__memory_engine_versioning_policy");
+const SUBSCRIPTIONS: ::memory::Table<u64, SubscriptionRegistration> =
+    ::memory::Table::new("__memory_engine_subscriptions");
+const IDENTIFIED_COUNTERS: ::memory::Table<String, u64> =
+    ::memory::Table::new("__memory_engine_identified_counters");
+const CHECKPOINTS: ::memory::Table<u64, CheckpointMetadata> =
+    ::memory::Table::new("__memory_engine_checkpoints");
+const CHECKPOINT_SEGMENTS: ::memory::Table<&'static [u8; 32], CheckpointSegment> =
+    ::memory::Table::new("__memory_engine_checkpoint_segments");
+const VERSIONING_POLICY: ::memory::Table<&'static str, VersioningPolicy> =
+    ::memory::Table::new("__memory_engine_versioning_policy");
 const VERSIONING_POLICY_KEY: &str = "configured";
-const COMPACTION_INTENT: memory::Table<&'static str, CompactionIntent> =
-    memory::Table::new("__memory_engine_compaction_intent");
+const COMPACTION_INTENT: ::memory::Table<&'static str, CompactionIntent> =
+    ::memory::Table::new("__memory_engine_compaction_intent");
 const COMPACTION_INTENT_KEY: &str = "pending";
 
 pub struct Engine {
-    pub(crate) storage: memory::Memory,
+    pub(crate) storage: ::memory::Memory,
     pub(crate) catalog: Catalog,
     pub(crate) subscriptions: SubscriptionRegistry,
     pub(crate) versioning_policy: Option<VersioningPolicy>,
@@ -140,7 +140,7 @@ impl Engine {
     }
 
     fn open_unrecovered(request: EngineOpen) -> Result<Self> {
-        let storage = memory::Memory::open_with_schema(request.path(), request.schema())?;
+        let storage = ::memory::Memory::open_with_schema(request.path(), request.schema())?;
         // Every validation runs before the first engine write: an open
         // that rejects a store must not mutate the store it rejects.
         let layout_plan = Self::validated_storage_layout(&storage)?;
@@ -151,7 +151,7 @@ impl Engine {
                 .collect(),
             // A catalog row that no longer decodes is a pre-family-identity
             // registration; surface the layout break, not a byte error.
-            Err(memory::Error::RkyvDecode { table, .. }) if table == CATALOG.name() => {
+            Err(::memory::Error::RkyvDecode { table, .. }) if table == CATALOG.name() => {
                 return Err(Error::StorageLayoutMismatch {
                     stored: LAYOUT_BEFORE_SLOT,
                     expected: STORAGE_LAYOUT,
@@ -329,7 +329,7 @@ impl Engine {
         let counts = self.log_counts()?;
         self.storage.write(|transaction| {
             for (key, row) in carried {
-                memory::Table::<String, RecordValue>::new(name.as_str()).insert(
+                ::memory::Table::<String, RecordValue>::new(name.as_str()).insert(
                     transaction,
                     key.clone(),
                     row,
@@ -3225,7 +3225,7 @@ impl Engine {
     /// stamped fresh; an older store that already opted into versioning
     /// refolds the layout-introduced derived slots from its complete
     /// log; everything else hard-fails with a typed layout error.
-    fn validated_storage_layout(storage: &memory::Memory) -> Result<LayoutOpenPlan> {
+    fn validated_storage_layout(storage: &::memory::Memory) -> Result<LayoutOpenPlan> {
         let stored = storage.read(|transaction| COUNTERS.get(transaction, STORAGE_LAYOUT_KEY))?;
         match stored {
             // Current layout: idempotent open, nothing to do.
@@ -3286,9 +3286,9 @@ impl Engine {
     /// transaction. Runs only after every read-only validation passed, so
     /// an open that rejects a store never mutates the store it rejects.
     fn apply_layout_plan(
-        transaction: &memory::WriteTransaction,
+        transaction: &::memory::WriteTransaction,
         plan: &LayoutOpenPlan,
-    ) -> memory::Result<()> {
+    ) -> ::memory::Result<()> {
         match plan {
             LayoutOpenPlan::Current => Ok(()),
             LayoutOpenPlan::StampFresh => {
@@ -3308,7 +3308,7 @@ impl Engine {
     /// versioned store obtains this row during its validated layout-6 open;
     /// that migration is additive and never deletes historical rows.
     fn validated_versioning_policy(
-        storage: &memory::Memory,
+        storage: &::memory::Memory,
         requested: Option<&VersioningPolicy>,
     ) -> Result<Option<VersioningPolicy>> {
         let recorded = storage
@@ -3327,7 +3327,7 @@ impl Engine {
     /// families new to the catalog (with an identified family's counter).
     /// A crash or failure anywhere inside leaves none of it.
     fn persist_open(
-        storage: &memory::Memory,
+        storage: &::memory::Memory,
         plan: &LayoutOpenPlan,
         policy: Option<&VersioningPolicy>,
         families: &[(FamilyKeying, TableName, TableRegistration)],
@@ -3736,10 +3736,10 @@ impl Engine {
     /// disabled store carries no versioned entry, so this is a no-op.
     pub(crate) fn insert_versioned_entry(
         &self,
-        transaction: &memory::WriteTransaction,
+        transaction: &::memory::WriteTransaction,
         entry: &Option<VersionedCommitLogEntry>,
         versioned_count: u64,
-    ) -> memory::Result<()> {
+    ) -> ::memory::Result<()> {
         if let Some(entry) = entry {
             CommitLog::append_versioned(transaction, entry, versioned_count)?;
             if self.versioning_policy.as_ref().is_some_and(|policy| {
@@ -3773,18 +3773,18 @@ enum LayoutOpenPlan {
 /// component-local tables. The type deliberately has no write surface:
 /// durable writes exist only behind the engine's logged choke points.
 pub struct StorageReader<'engine> {
-    storage: &'engine memory::Memory,
+    storage: &'engine ::memory::Memory,
 }
 
 impl<'engine> StorageReader<'engine> {
-    fn new(storage: &'engine memory::Memory) -> Self {
+    fn new(storage: &'engine ::memory::Memory) -> Self {
         Self { storage }
     }
 
     pub fn read<Row>(
         &self,
-        body: impl FnOnce(&memory::ReadTransaction) -> memory::Result<Row>,
-    ) -> memory::Result<Row> {
+        body: impl FnOnce(&::memory::ReadTransaction) -> ::memory::Result<Row>,
+    ) -> ::memory::Result<Row> {
         self.storage.read(body)
     }
 }

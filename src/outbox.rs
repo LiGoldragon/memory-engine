@@ -8,14 +8,14 @@
 //! shipped cursor. Transport, acknowledgement policy, and the mirror
 //! actor itself live outside this library-only crate.
 
-use memory::WriteTransaction;
+use ::memory::WriteTransaction;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 
 use crate::{CommitSequence, EntryDigest, Error, Result, VersionedCommitLogEntry};
 
-const OUTBOX: memory::Table<u64, OutboxEntry> = memory::Table::new("__memory_engine_outbox");
-const MIRROR_CURSOR: memory::Table<&'static str, MirrorHead> =
-    memory::Table::new("__memory_engine_mirror_cursor");
+const OUTBOX: ::memory::Table<u64, OutboxEntry> = ::memory::Table::new("__memory_engine_outbox");
+const MIRROR_CURSOR: ::memory::Table<&'static str, MirrorHead> =
+    ::memory::Table::new("__memory_engine_mirror_cursor");
 const MIRROR_SHIPPED_KEY: &str = "shipped";
 
 /// One durable outbox row: the queue position of a versioned commit
@@ -127,11 +127,11 @@ pub enum Durability {
 /// lends in — the outbox never opens a transaction of its own, so the
 /// engine keeps the row atomic with the versioned entry it mirrors.
 pub(crate) struct Outbox<'engine> {
-    storage: &'engine memory::Memory,
+    storage: &'engine ::memory::Memory,
 }
 
 impl<'engine> Outbox<'engine> {
-    pub(crate) fn new(storage: &'engine memory::Memory) -> Self {
+    pub(crate) fn new(storage: &'engine ::memory::Memory) -> Self {
         Self { storage }
     }
 
@@ -171,7 +171,7 @@ impl<'engine> Outbox<'engine> {
     pub(crate) fn record(
         transaction: &WriteTransaction,
         entry: &VersionedCommitLogEntry,
-    ) -> memory::Result<()> {
+    ) -> ::memory::Result<()> {
         OUTBOX.insert(
             transaction,
             entry.commit_sequence().value(),
@@ -195,7 +195,7 @@ impl<'engine> Outbox<'engine> {
     pub(crate) fn compact_acknowledged_through(
         transaction: &WriteTransaction,
         keys: &[u64],
-    ) -> memory::Result<()> {
+    ) -> ::memory::Result<()> {
         for sequence in keys {
             OUTBOX.remove(transaction, *sequence)?;
         }

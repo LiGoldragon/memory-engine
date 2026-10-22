@@ -25,8 +25,8 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 pub const NOTES: TableName = TableName::new("notes");
-const CATALOG: memory::Table<&'static str, TableRegistration> =
-    memory::Table::new("__memory_engine_catalog");
+const CATALOG: ::memory::Table<&'static str, TableRegistration> =
+    ::memory::Table::new("__memory_engine_catalog");
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 #[rkyv(derive(Debug))]
@@ -204,9 +204,9 @@ where
             >,
         >,
 {
-    let kernel = memory::Memory::open_with_schema(
+    let kernel = ::memory::Memory::open_with_schema(
         path,
-        &memory::Schema {
+        &::memory::Schema {
             version: SchemaVersion::new(1),
         },
     )
@@ -218,7 +218,7 @@ where
                 .expect("notes are catalogued")
                 .identity()
                 .schema_hash();
-            let rows = memory::Table::<String, Row>::new(NOTES.as_str()).iter(transaction)?;
+            let rows = ::memory::Table::<String, Row>::new(NOTES.as_str()).iter(transaction)?;
             Ok((marker, rows))
         })
         .expect("raw store reads")

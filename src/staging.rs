@@ -46,8 +46,8 @@ use crate::{
     VersionedPayload, VersionedStoreName,
 };
 
-const STAGING_SLOT: memory::Table<&'static str, StagedOperationGroup> =
-    memory::Table::new("__memory_engine_staging_slot");
+const STAGING_SLOT: ::memory::Table<&'static str, StagedOperationGroup> =
+    ::memory::Table::new("__memory_engine_staging_slot");
 const STAGED_GROUP_KEY: &str = "staged_group";
 
 /// One durably parked operation group: the ordered would-be versioned
@@ -318,11 +318,11 @@ impl DiscardStagedReceipt {
 /// transaction the engine opened and lends in, so clearing the slot
 /// stays atomic with the appends it accompanies.
 pub(crate) struct Staging<'engine> {
-    storage: &'engine memory::Memory,
+    storage: &'engine ::memory::Memory,
 }
 
 impl<'engine> Staging<'engine> {
-    pub(crate) fn new(storage: &'engine memory::Memory) -> Self {
+    pub(crate) fn new(storage: &'engine ::memory::Memory) -> Self {
         Self { storage }
     }
 
@@ -344,9 +344,9 @@ impl<'engine> Staging<'engine> {
     /// Park a group inside an engine-owned transaction, so a durable
     /// compaction intent and its complete retraction plan appear together.
     pub(crate) fn park_in(
-        transaction: &memory::WriteTransaction,
+        transaction: &::memory::WriteTransaction,
         group: &StagedOperationGroup,
-    ) -> memory::Result<()> {
+    ) -> ::memory::Result<()> {
         STAGING_SLOT.insert(transaction, STAGED_GROUP_KEY, group)
     }
 
@@ -360,7 +360,7 @@ impl<'engine> Staging<'engine> {
 
     /// Clear the slot inside a lent write transaction — the
     /// materialize path, atomic with the entry appends beside it.
-    pub(crate) fn clear_in(transaction: &memory::WriteTransaction) -> memory::Result<()> {
+    pub(crate) fn clear_in(transaction: &::memory::WriteTransaction) -> ::memory::Result<()> {
         STAGING_SLOT.remove(transaction, STAGED_GROUP_KEY)?;
         Ok(())
     }

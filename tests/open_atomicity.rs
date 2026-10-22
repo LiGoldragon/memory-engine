@@ -16,13 +16,14 @@ use memory_engine::{
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
-const COUNTERS: memory::Table<&'static str, u64> = memory::Table::new("__memory_engine_counters");
+const COUNTERS: ::memory::Table<&'static str, u64> =
+    ::memory::Table::new("__memory_engine_counters");
 const LAYOUT_KEY: &str = "engine_storage_layout";
-const POLICY: memory::Table<&'static str, VersioningPolicy> =
-    memory::Table::new("__memory_engine_versioning_policy");
+const POLICY: ::memory::Table<&'static str, VersioningPolicy> =
+    ::memory::Table::new("__memory_engine_versioning_policy");
 const POLICY_KEY: &str = "configured";
-const CATALOG: memory::Table<&'static str, TableRegistration> =
-    memory::Table::new("__memory_engine_catalog");
+const CATALOG: ::memory::Table<&'static str, TableRegistration> =
+    ::memory::Table::new("__memory_engine_catalog");
 const DOCUMENTED_LAYOUT: u64 = 7;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -120,9 +121,9 @@ impl Store {
     }
 
     fn stamped(&self) -> Stamped {
-        let kernel = memory::Memory::open_with_schema(
+        let kernel = ::memory::Memory::open_with_schema(
             &self.path(),
-            &memory::Schema {
+            &::memory::Schema {
                 version: SchemaVersion::new(1),
             },
         )

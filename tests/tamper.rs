@@ -29,13 +29,14 @@ use tempfile::TempDir;
 /// The engine's internal tables, redeclared for doctoring. The engine
 /// never exposes a write path to them — `StorageReader` is read-only —
 /// so the tests reach them through the raw storage kernel.
-const VERSIONED_COMMIT_LOG: memory::Table<u64, VersionedCommitLogEntry> =
-    memory::Table::new("__memory_engine_versioned_commit_log");
-const CHECKPOINTS: memory::Table<u64, CheckpointMetadata> =
-    memory::Table::new("__memory_engine_checkpoints");
-const CHECKPOINT_SEGMENTS: memory::Table<&'static [u8; 32], CheckpointSegment> =
-    memory::Table::new("__memory_engine_checkpoint_segments");
-const COUNTERS: memory::Table<&'static str, u64> = memory::Table::new("__memory_engine_counters");
+const VERSIONED_COMMIT_LOG: ::memory::Table<u64, VersionedCommitLogEntry> =
+    ::memory::Table::new("__memory_engine_versioned_commit_log");
+const CHECKPOINTS: ::memory::Table<u64, CheckpointMetadata> =
+    ::memory::Table::new("__memory_engine_checkpoints");
+const CHECKPOINT_SEGMENTS: ::memory::Table<&'static [u8; 32], CheckpointSegment> =
+    ::memory::Table::new("__memory_engine_checkpoint_segments");
+const COUNTERS: ::memory::Table<&'static str, u64> =
+    ::memory::Table::new("__memory_engine_counters");
 const LATEST_CHECKPOINT_KEY: &str = "latest_checkpoint";
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -179,10 +180,10 @@ impl Fixture {
     /// Open the `.memory` file through the raw storage kernel — the
     /// doctoring surface. The engine handle must be dropped first;
     /// redb holds an exclusive file lock.
-    fn raw_kernel(&self, name: &str) -> memory::Memory {
-        memory::Memory::open_with_schema(
+    fn raw_kernel(&self, name: &str) -> ::memory::Memory {
+        ::memory::Memory::open_with_schema(
             &self.database_path(name),
-            &memory::Schema {
+            &::memory::Schema {
                 version: SchemaVersion::new(1),
             },
         )

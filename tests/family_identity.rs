@@ -297,12 +297,12 @@ fn pre_family_identity_store_hard_fails_with_typed_layout_error() {
     // Simulate a layout-1 store: engine counters exist, but the
     // layout slot (introduced with typed family identity) does not.
     {
-        const COUNTERS: memory::Table<&'static str, u64> =
-            memory::Table::new("__memory_engine_counters");
-        let schema = memory::Schema {
+        const COUNTERS: ::memory::Table<&'static str, u64> =
+            ::memory::Table::new("__memory_engine_counters");
+        let schema = ::memory::Schema {
             version: SchemaVersion::new(1),
         };
-        let storage = memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
+        let storage = ::memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
         storage
             .write(|transaction| COUNTERS.insert(transaction, "latest_commit_sequence", &7))
             .expect("legacy counter writes");
@@ -331,12 +331,12 @@ fn pre_outbox_layout_store_hard_fails_with_typed_layout_error() {
     // write transaction. Opening it under a newer layout would let a
     // mirror silently ship an incomplete history, so it hard-fails typed.
     {
-        const COUNTERS: memory::Table<&'static str, u64> =
-            memory::Table::new("__memory_engine_counters");
-        let schema = memory::Schema {
+        const COUNTERS: ::memory::Table<&'static str, u64> =
+            ::memory::Table::new("__memory_engine_counters");
+        let schema = ::memory::Schema {
             version: SchemaVersion::new(1),
         };
-        let storage = memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
+        let storage = ::memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
         storage
             .write(|transaction| COUNTERS.insert(transaction, "engine_storage_layout", &2))
             .expect("layout-2 slot writes");
@@ -364,12 +364,12 @@ fn string_record_key_layout_store_hard_fails_with_typed_layout_error() {
     // persisted RecordKey values still used the old string-only archived
     // shape. Layout 4 makes key kind part of the durable log/view identity.
     {
-        const COUNTERS: memory::Table<&'static str, u64> =
-            memory::Table::new("__memory_engine_counters");
-        let schema = memory::Schema {
+        const COUNTERS: ::memory::Table<&'static str, u64> =
+            ::memory::Table::new("__memory_engine_counters");
+        let schema = ::memory::Schema {
             version: SchemaVersion::new(1),
         };
-        let storage = memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
+        let storage = ::memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
         storage
             .write(|transaction| COUNTERS.insert(transaction, "engine_storage_layout", &3))
             .expect("layout-3 slot writes");
@@ -403,12 +403,12 @@ fn layout_four_store_without_versioned_log_hard_fails_with_typed_layout_error() 
     // place instead; see tests/layout_rebuild.rs.) State loss is
     // unacceptable (Spirit 29pb).
     {
-        const COUNTERS: memory::Table<&'static str, u64> =
-            memory::Table::new("__memory_engine_counters");
-        let schema = memory::Schema {
+        const COUNTERS: ::memory::Table<&'static str, u64> =
+            ::memory::Table::new("__memory_engine_counters");
+        let schema = ::memory::Schema {
             version: SchemaVersion::new(1),
         };
-        let storage = memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
+        let storage = ::memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
         storage
             .write(|transaction| COUNTERS.insert(transaction, "engine_storage_layout", &4))
             .expect("layout-4 slot writes");
@@ -431,15 +431,15 @@ fn layout_four_store_without_versioned_log_hard_fails_with_typed_layout_error() 
 fn rejected_open_does_not_stamp_the_store_it_rejects() {
     let fixture = Fixture::new();
     let path = fixture.database_path("rejected-open");
-    const COUNTERS: memory::Table<&'static str, u64> =
-        memory::Table::new("__memory_engine_counters");
-    let schema = memory::Schema {
+    const COUNTERS: ::memory::Table<&'static str, u64> =
+        ::memory::Table::new("__memory_engine_counters");
+    let schema = ::memory::Schema {
         version: SchemaVersion::new(1),
     };
 
     // A layout-1 store: engine history without a layout slot.
     {
-        let storage = memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
+        let storage = ::memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
         storage
             .write(|transaction| COUNTERS.insert(transaction, "latest_commit_sequence", &7))
             .expect("legacy counter writes");
@@ -451,7 +451,7 @@ fn rejected_open_does_not_stamp_the_store_it_rejects() {
 
     // The rejecting open must not have stamped a layout slot into the
     // store it rejected.
-    let storage = memory::Memory::open_with_schema(&path, &schema).expect("kernel reopens");
+    let storage = ::memory::Memory::open_with_schema(&path, &schema).expect("kernel reopens");
     let stamped = storage
         .read(|transaction| COUNTERS.get(transaction, "engine_storage_layout"))
         .expect("layout slot reads");

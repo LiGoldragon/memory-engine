@@ -754,13 +754,13 @@ impl ValidationReceipt {
 /// The committed rows of one registered table, read inside one storage
 /// read transaction so the rows and the database marker agree.
 pub(crate) struct CommittedRows<'transaction, RecordValue> {
-    transaction: &'transaction memory::ReadTransaction,
+    transaction: &'transaction ::memory::ReadTransaction,
     table: &'transaction TableReference<RecordValue>,
 }
 
 impl<'transaction, RecordValue> CommittedRows<'transaction, RecordValue> {
     pub(crate) fn new(
-        transaction: &'transaction memory::ReadTransaction,
+        transaction: &'transaction ::memory::ReadTransaction,
         table: &'transaction TableReference<RecordValue>,
     ) -> Self {
         Self { transaction, table }

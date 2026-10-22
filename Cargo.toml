@@ -20,14 +20,6 @@ signal-sema = { git = "https://github.com/LiGoldragon/signal-sema.git", rev = "4
 thiserror = "2"
 
 [dev-dependencies]
-core-ethos = { git = "https://github.com/LiGoldragon/core-ethos.git", rev = "43b48c779c54ee9f05cbcc111d5d88074b162461" }
-core-nomos = { git = "https://github.com/LiGoldragon/core-nomos.git", rev = "7b60721d199551b648d42a49934a2f0ef950c595" }
-name-table = { git = "https://github.com/LiGoldragon/name-table.git", rev = "a22f48d8040ab9235f3552ad8654ff8e27b8157d" }
-rust-logos = { git = "https://github.com/LiGoldragon/rust-logos.git", rev = "081e99596826b15e2ff7f1356ae8d797b18aeffc" }
-schema-rust = { git = "https://github.com/LiGoldragon/schema-rust.git", rev = "664335240a40728826cfaa09e3100cd867031912", default-features = false }
-sema-translator = { git = "https://github.com/LiGoldragon/sema-translator.git", rev = "287fbd728a05b1a6be1dc8a28bcf3ca06d9916b3", default-features = false }
-signal-sema-translator = { git = "https://github.com/LiGoldragon/signal-sema-translator.git", rev = "3f41813dd63904c7e2b3da4382eff64ed1bf12fe" }
-structural-codec = { git = "https://github.com/LiGoldragon/structural-codec.git", rev = "879d76f91facedd6d5cbca79e282260e1beb9478" }
 tempfile = "3"
 
 [lints.rust]

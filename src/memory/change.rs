@@ -26,8 +26,8 @@ use super::{
 };
 
 /// Every committed change's receipt, keyed by its change identity.
-const CHANGE_RECEIPTS: memory::Table<&'static [u8; 32], ChangeReceipt> =
-    memory::Table::new("__memory_engine_change_receipts");
+const CHANGE_RECEIPTS: ::memory::Table<&'static [u8; 32], ChangeReceipt> =
+    ::memory::Table::new("__memory_engine_change_receipts");
 
 /// Committing a record's typed change and resolving it by its identity.
 pub trait MemoryChanges {

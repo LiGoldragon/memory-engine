@@ -75,7 +75,7 @@ fn engine_hands_out_no_raw_storage_kernel_or_write_transaction() {
         "Engine must not hand out the raw storage kernel"
     );
     assert!(
-        !engine_source.contains("-> &memory::Memory"),
+        !engine_source.contains("-> &::memory::Memory"),
         "no public method may return the raw kernel handle"
     );
     assert!(

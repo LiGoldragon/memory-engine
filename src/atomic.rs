@@ -164,7 +164,7 @@ trait AtomicWrite: Send + Sync {
     fn table(&self) -> TableName;
     fn key(&self) -> &RecordKey;
     fn prepare(&self, engine: &Engine) -> Result<PreparedAtomicWrite>;
-    fn materialize(&self, transaction: &memory::WriteTransaction) -> memory::Result<()>;
+    fn materialize(&self, transaction: &::memory::WriteTransaction) -> ::memory::Result<()>;
 }
 
 struct TypedAtomicWrite<RecordValue> {
@@ -250,7 +250,7 @@ where
         })
     }
 
-    fn materialize(&self, transaction: &memory::WriteTransaction) -> memory::Result<()> {
+    fn materialize(&self, transaction: &::memory::WriteTransaction) -> ::memory::Result<()> {
         match self.kind {
             AtomicKind::Assert | AtomicKind::Mutate => self.table.memory_table().insert(
                 transaction,

@@ -19,10 +19,6 @@ impl RepositoryFixture {
         fs::read_to_string(self.root.join("Cargo.toml")).expect("Cargo.toml is readable")
     }
 
-    fn cargo_lock(&self) -> String {
-        fs::read_to_string(self.root.join("Cargo.lock")).expect("Cargo.lock is readable")
-    }
-
     fn has_file(&self, path: impl AsRef<Path>) -> bool {
         self.root.join(path).exists()
     }
@@ -126,53 +122,23 @@ fn memory_engine_normal_dependency_tree_is_one_exact_runtime_family() {
 }
 
 #[test]
-fn strict_memory_generation_uses_one_exact_published_producer_train() {
+fn table_specification_fixture_is_owned_by_the_engine() {
     let fixture = RepositoryFixture::current();
+    assert!(fixture.has_file("tests/fixtures/domain_snapshot_table.rs"));
     let cargo = fixture.cargo_toml();
-    let lock = fixture.cargo_lock();
-
-    for exact_dependency in [
-        "core-ethos = { git = \"https://github.com/LiGoldragon/core-ethos.git\", rev = \"43b48c779c54ee9f05cbcc111d5d88074b162461\" }",
-        "core-nomos = { git = \"https://github.com/LiGoldragon/core-nomos.git\", rev = \"7b60721d199551b648d42a49934a2f0ef950c595\" }",
-        "rust-logos = { git = \"https://github.com/LiGoldragon/rust-logos.git\", rev = \"081e99596826b15e2ff7f1356ae8d797b18aeffc\" }",
-        "schema-rust = { git = \"https://github.com/LiGoldragon/schema-rust.git\", rev = \"664335240a40728826cfaa09e3100cd867031912\", default-features = false }",
-        "sema-translator = { git = \"https://github.com/LiGoldragon/sema-translator.git\", rev = \"287fbd728a05b1a6be1dc8a28bcf3ca06d9916b3\", default-features = false }",
-        "signal-sema-translator = { git = \"https://github.com/LiGoldragon/signal-sema-translator.git\", rev = \"3f41813dd63904c7e2b3da4382eff64ed1bf12fe\" }",
+    for generator in [
+        "schema-rust",
+        "core-ethos",
+        "core-nomos",
+        "rust-logos",
+        "sema-translator",
+        "structural-codec",
     ] {
         assert!(
-            cargo.contains(exact_dependency),
-            "strict Memory consumer omitted exact producer {exact_dependency}"
+            !cargo.contains(&format!("{generator} =")),
+            "engine contract fixtures must not require {generator}"
         );
     }
-    for sole_package in [
-        "core-ethos",
-        "core-logos",
-        "core-nomos",
-        "protos",
-        "rust-logos",
-        "schema-rust",
-        "sema-translator",
-        "signal-sema-translator",
-    ] {
-        assert_eq!(
-            lock.matches(&format!("name = \"{sole_package}\"")).count(),
-            1,
-            "strict Memory generation admitted more than one {sole_package} source"
-        );
-    }
-    assert!(
-        !lock.contains("name = \"schema-language\""),
-        "the deleted pre-bootstrap schema world must not enter the Memory proof graph"
-    );
-}
-
-#[test]
-fn current_memory_source_is_the_only_live_schema_document() {
-    let fixture = RepositoryFixture::current();
-
-    assert!(fixture.has_file("schema/witness.memory"));
-    assert!(fixture.has_file("tests/fixtures/generated_memory_table.rs"));
-    assert!(!fixture.has_file("schema/memory-engine.concept.schema"));
 }
 
 #[test]

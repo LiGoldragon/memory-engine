@@ -42,3 +42,11 @@ nix run .#test
 nix run .#test-subscriptions
 nix flake check -L
 ```
+
+## Contract witnesses
+
+`tests/table_specification.rs` checks typed descriptor identity,
+domain-key projection, writes, reads and persistence after reopen.
+Its `tests/fixtures/domain_snapshot_table.rs` is an engine-owned,
+hand-authored contract fixture. Source-generation behavior belongs
+to the producer crates; this engine tests the descriptor API it consumes.

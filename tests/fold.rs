@@ -199,11 +199,11 @@ fn rebuild_clears_a_stale_row_the_log_retracted() {
     // the retracted row through the raw storage kernel. (No engine path
     // can do this — StorageReader is read-only.)
     {
-        const THOUGHTS: memory::Table<String, Thought> = memory::Table::new("thoughts");
-        let schema = memory::Schema {
+        const THOUGHTS: ::memory::Table<String, Thought> = ::memory::Table::new("thoughts");
+        let schema = ::memory::Schema {
             version: SchemaVersion::new(1),
         };
-        let storage = memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
+        let storage = ::memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
         storage
             .write(|transaction| {
                 THOUGHTS.insert(
