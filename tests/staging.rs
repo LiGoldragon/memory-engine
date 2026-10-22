@@ -8,14 +8,14 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Assertion, DeltaKind, Engine, EngineOpen, EngineRecord, Error, FamilyDirectory, FamilyName,
     IdentifiedAssertion, IdentifiedQueryPlan, IdentifiedTableDescriptor, IdentifiedTableReference,
     Mutation, QueryPlan, RecordKey, Retraction, RowMaterializer, SchemaHash, SchemaVersion,
     SinkError, SubscriptionDeliveryMode, SubscriptionEvent, SubscriptionSink, TableDescriptor,
     TableName, TableReference, VersionedStoreName, VersioningPolicy,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -58,7 +58,7 @@ struct Families {
 }
 
 impl FamilyDirectory for Families {
-    fn materialize(&self, row: RowMaterializer<'_>) -> sema_engine::Result<()> {
+    fn materialize(&self, row: RowMaterializer<'_>) -> memory_engine::Result<()> {
         match row.family().family().as_str() {
             "thought" => row.apply(self.thoughts),
             "tally" => row.apply_identified(self.tallies),
@@ -68,7 +68,7 @@ impl FamilyDirectory for Families {
         }
     }
 
-    fn announce(&self, delta: sema_engine::DeltaAnnouncer<'_>) -> sema_engine::Result<()> {
+    fn announce(&self, delta: memory_engine::DeltaAnnouncer<'_>) -> memory_engine::Result<()> {
         match delta.family().family().as_str() {
             "thought" => delta.announce(self.thoughts),
             "tally" => delta.announce_identified(self.tallies),
@@ -91,7 +91,7 @@ impl Fixture {
     }
 
     fn database_path(&self, name: &str) -> PathBuf {
-        self.directory.path().join(format!("{name}.sema"))
+        self.directory.path().join(format!("{name}.memory"))
     }
 
     /// Twin stores share the store NAME (digests fold it) while living
@@ -192,10 +192,10 @@ impl Registered {
 
 #[derive(Debug, PartialEq, Eq)]
 struct ObservableState {
-    versioned_log: Vec<sema_engine::VersionedCommitLogEntry>,
+    versioned_log: Vec<memory_engine::VersionedCommitLogEntry>,
     commit_log_length: usize,
-    outbox: Vec<(u64, sema_engine::EntryDigest)>,
-    chain_head: Option<sema_engine::EntryDigest>,
+    outbox: Vec<(u64, memory_engine::EntryDigest)>,
+    chain_head: Option<memory_engine::EntryDigest>,
     commit_sequence: u64,
     snapshot: u64,
     thoughts: Vec<Thought>,

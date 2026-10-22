@@ -7,22 +7,22 @@
 
 use std::path::PathBuf;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Decision, Engine, EngineOpen, EngineRecord, Error, FamilyName, MemoryDefinition,
     MemoryUpgrades, MemoryVersion, OpenFault, RecordKey, SchemaHash, SchemaVersion,
     TableDescriptor, TableName, TableRegistration, UpgradeFrom, UpgradeOutcome, VersionedStoreName,
     VersioningPolicy,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
-const COUNTERS: sema::Table<&'static str, u64> = sema::Table::new("__sema_engine_counters");
+const COUNTERS: memory::Table<&'static str, u64> = memory::Table::new("__memory_engine_counters");
 const LAYOUT_KEY: &str = "engine_storage_layout";
-const POLICY: sema::Table<&'static str, VersioningPolicy> =
-    sema::Table::new("__sema_engine_versioning_policy");
+const POLICY: memory::Table<&'static str, VersioningPolicy> =
+    memory::Table::new("__memory_engine_versioning_policy");
 const POLICY_KEY: &str = "configured";
-const CATALOG: sema::Table<&'static str, TableRegistration> =
-    sema::Table::new("__sema_engine_catalog");
+const CATALOG: memory::Table<&'static str, TableRegistration> =
+    memory::Table::new("__memory_engine_catalog");
 const DOCUMENTED_LAYOUT: u64 = 7;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -92,7 +92,7 @@ impl Store {
     }
 
     fn path(&self) -> PathBuf {
-        self.directory.path().join("open.sema")
+        self.directory.path().join("open.memory")
     }
 
     fn policy(&self) -> VersioningPolicy {
@@ -120,9 +120,9 @@ impl Store {
     }
 
     fn stamped(&self) -> Stamped {
-        let kernel = sema::Sema::open_with_schema(
+        let kernel = memory::Memory::open_with_schema(
             &self.path(),
-            &sema::Schema {
+            &memory::Schema {
                 version: SchemaVersion::new(1),
             },
         )

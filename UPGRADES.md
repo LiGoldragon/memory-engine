@@ -35,7 +35,7 @@ and `UpgradeInterrupted`; exhaustive matches over it need the new arms.
 New, additive: `Memorable` and `MemoryChanges::change` /
 `change_receipt` give a record a typed change with a three-branch
 outcome and durable receipts under a caller-chosen `ChangeIdentifier`,
-stored in the new internal table `__sema_engine_change_receipts`. The
+stored in the new internal table `__memory_engine_change_receipts`. The
 engine storage layout number is unchanged; an existing store opens as is
 and gains that table on its first typed change. No other repository in
 the workspace used `with_prior`, so no dependent repository needs a

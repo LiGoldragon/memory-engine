@@ -1,4 +1,4 @@
-Sema.{1 0 0}
+Memory.{1 0 0}
 []
 {
   [Domain.String DomainSnapshot.{Domain Integer String}]

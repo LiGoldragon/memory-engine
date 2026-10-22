@@ -1,5 +1,5 @@
 {
-  description = "sema-engine — typed database verb engine over sema";
+  description = "memory-engine — typed database verb engine over memory";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -46,7 +46,7 @@
         };
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
         scriptApplication = name: script: pkgs.writeShellApplication {
-          name = "sema-engine-${name}";
+          name = "memory-engine-${name}";
           runtimeInputs = [
             toolchain
           ];
@@ -76,38 +76,38 @@
         apps = {
           default = {
             type = "app";
-            program = "${testScript}/bin/sema-engine-test";
-            meta.description = "Run sema-engine's full test suite";
+            program = "${testScript}/bin/memory-engine-test";
+            meta.description = "Run memory-engine's full test suite";
           };
 
           test = {
             type = "app";
-            program = "${testScript}/bin/sema-engine-test";
-            meta.description = "Run sema-engine's full test suite";
+            program = "${testScript}/bin/memory-engine-test";
+            meta.description = "Run memory-engine's full test suite";
           };
 
           test-dependency-boundary = {
             type = "app";
-            program = "${testDependencyBoundaryScript}/bin/sema-engine-test-dependency-boundary";
-            meta.description = "Run sema-engine's architectural dependency witnesses";
+            program = "${testDependencyBoundaryScript}/bin/memory-engine-test-dependency-boundary";
+            meta.description = "Run memory-engine's architectural dependency witnesses";
           };
 
           test-engine = {
             type = "app";
-            program = "${testEngineScript}/bin/sema-engine-test-engine";
-            meta.description = "Run sema-engine's registered-record execution witnesses";
+            program = "${testEngineScript}/bin/memory-engine-test-engine";
+            meta.description = "Run memory-engine's registered-record execution witnesses";
           };
 
           test-operation-log = {
             type = "app";
-            program = "${testOperationLogScript}/bin/sema-engine-test-operation-log";
-            meta.description = "Run sema-engine's operation-log and snapshot cursor witnesses";
+            program = "${testOperationLogScript}/bin/memory-engine-test-operation-log";
+            meta.description = "Run memory-engine's operation-log and snapshot cursor witnesses";
           };
 
           test-subscriptions = {
             type = "app";
-            program = "${testSubscriptionsScript}/bin/sema-engine-test-subscriptions";
-            meta.description = "Run sema-engine's subscription delivery witnesses";
+            program = "${testSubscriptionsScript}/bin/memory-engine-test-subscriptions";
+            meta.description = "Run memory-engine's subscription delivery witnesses";
           };
         };
 
@@ -161,7 +161,7 @@
         };
 
         devShells.default = pkgs.mkShell {
-          name = "sema-engine";
+          name = "memory-engine";
           packages = [
             pkgs.jujutsu
             pkgs.pkg-config

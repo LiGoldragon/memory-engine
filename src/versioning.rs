@@ -237,7 +237,7 @@ impl StoreSchemaHash {
     fn from_inventory(mut inventory: Vec<(&FamilyName, SchemaHash)>) -> Self {
         inventory.sort();
         let mut hasher = blake3::Hasher::new();
-        EntryDigest::update_bytes(&mut hasher, b"sema-engine-store-schema-hash-v1");
+        EntryDigest::update_bytes(&mut hasher, b"memory-engine-store-schema-hash-v1");
         hasher.update(&(inventory.len() as u64).to_le_bytes());
         for (family, schema_hash) in inventory {
             EntryDigest::update_bytes(&mut hasher, family.as_str().as_bytes());
@@ -385,7 +385,7 @@ impl EntryDigest {
         operations: &NonEmpty<VersionedLogOperation>,
     ) -> Self {
         let mut hasher = blake3::Hasher::new();
-        Self::update_bytes(&mut hasher, b"sema-engine-versioned-commit-log-entry-v2");
+        Self::update_bytes(&mut hasher, b"memory-engine-versioned-commit-log-entry-v2");
         Self::update_bytes(&mut hasher, store_name.as_str().as_bytes());
         Self::update_bytes(&mut hasher, schema_hash.bytes());
         hasher.update(&commit_sequence.value().to_le_bytes());

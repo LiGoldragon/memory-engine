@@ -1,8 +1,8 @@
-# sema-engine
+# memory-engine
 
-`sema-engine` is the full database engine library over `sema` and
+`memory-engine` is the full database engine library over `memory` and
 `signal-sema`. It executes typed database verbs over component-owned
-`.sema` files.
+`.memory` files.
 
 It is library-only: no daemon, no actors, no sockets, no NOTA parser,
 and no Persona-specific contract dependencies.

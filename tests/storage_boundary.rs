@@ -1,6 +1,6 @@
 //! Architectural truth witnesses for the storage boundary: the public
 //! engine API exposes no durable-write path that bypasses the commit
-//! log. The narrowed kernel handoff type, [`sema_engine::StorageReader`],
+//! log. The narrowed kernel handoff type, [`memory_engine::StorageReader`],
 //! simply has no write affordance — the type system is the witness;
 //! these tests pin the source surface so the affordance cannot
 //! silently return.
@@ -8,11 +8,11 @@
 use std::fs;
 use std::path::PathBuf;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Assertion, Engine, EngineOpen, EngineRecord, FamilyName, RecordKey, SchemaHash, SchemaVersion,
     StorageKernelTable, TableDescriptor, TableName,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -57,7 +57,7 @@ impl EngineFixture {
 
     fn open_engine(&self) -> Engine {
         Engine::open(EngineOpen::new(
-            self.directory.path().join("engine.sema"),
+            self.directory.path().join("engine.memory"),
             SchemaVersion::new(1),
         ))
         .expect("engine opens")
@@ -75,12 +75,12 @@ fn engine_hands_out_no_raw_storage_kernel_or_write_transaction() {
         "Engine must not hand out the raw storage kernel"
     );
     assert!(
-        !engine_source.contains("-> &sema::Sema"),
+        !engine_source.contains("-> &memory::Memory"),
         "no public method may return the raw kernel handle"
     );
     assert!(
-        !lib_source.contains("Sema as StorageKernel,")
-            && !lib_source.contains("Sema as StorageKernel}"),
+        !lib_source.contains("Memory as StorageKernel,")
+            && !lib_source.contains("Memory as StorageKernel}"),
         "lib must not re-export the raw kernel handle type"
     );
     assert!(
@@ -111,7 +111,7 @@ fn storage_reader_has_a_read_affordance_and_no_write_affordance() {
 #[test]
 fn storage_reader_observes_state_written_through_logged_choke_points() {
     const COUNTERS: StorageKernelTable<&'static str, u64> =
-        StorageKernelTable::new("__sema_engine_counters");
+        StorageKernelTable::new("__memory_engine_counters");
 
     let fixture = EngineFixture::new();
     let mut engine = fixture.open_engine();

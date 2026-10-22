@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     AggregatePlan, Assertion, CommitRequest, CommitSequence, DatabaseMarker, Engine, EngineOpen,
     EngineRecord, FamilyName, FieldSelection, IdentifiedAssertion, IdentifiedMutation,
     IdentifiedQueryPlan, IdentifiedRetraction, IdentifiedTableDescriptor, KeyRange, KeyedAssertion,
@@ -9,6 +8,7 @@ use sema_engine::{
     Retraction, RuleSetRef, SchemaHash, SchemaVersion, SnapshotIdentifier, TableDescriptor,
     TableName, UnificationPlan,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_sema::SemaOperation;
 use tempfile::TempDir;
 
@@ -62,7 +62,7 @@ impl EngineFixture {
     }
 
     fn database_path(&self) -> PathBuf {
-        self.directory.path().join("engine.sema")
+        self.directory.path().join("engine.memory")
     }
 
     fn open_engine(&self) -> Engine {
@@ -430,7 +430,7 @@ fn engine_mutates_identified_record_without_changing_identifier() {
     );
     assert!(matches!(
         missing_error,
-        sema_engine::Error::RecordNotFound { .. }
+        memory_engine::Error::RecordNotFound { .. }
     ));
 }
 
@@ -529,7 +529,7 @@ fn validate_uses_same_typed_plan_errors_as_match() {
 
     assert!(matches!(
         error,
-        sema_engine::Error::UnsupportedReadPlan {
+        memory_engine::Error::UnsupportedReadPlan {
             operator: ReadOperator::Project
         }
     ));
@@ -605,7 +605,7 @@ fn commit_missing_record_rolls_back_entire_bundle() {
         .match_records(QueryPlan::all(records))
         .expect("match succeeds after failed commit");
 
-    assert!(matches!(error, sema_engine::Error::RecordNotFound { .. }));
+    assert!(matches!(error, memory_engine::Error::RecordNotFound { .. }));
     assert!(snapshot.records().is_empty());
     assert!(engine.commit_log().expect("commit log reads").is_empty());
     assert_eq!(
@@ -626,7 +626,7 @@ fn commit_empty_batch_returns_typed_error() {
         .commit(CommitRequest::<ToyRecord>::new(records))
         .expect_err("empty commit request is rejected");
 
-    assert!(matches!(error, sema_engine::Error::EmptyCommit { .. }));
+    assert!(matches!(error, memory_engine::Error::EmptyCommit { .. }));
 }
 
 #[test]
@@ -654,7 +654,7 @@ fn commit_duplicate_keys_return_typed_error_before_writing() {
 
     assert!(matches!(
         error,
-        sema_engine::Error::DuplicateWriteKey { .. }
+        memory_engine::Error::DuplicateWriteKey { .. }
     ));
     assert_eq!(snapshot.records(), &[ToyRecord::new("alpha", "first")]);
     assert_eq!(log.len(), 1);
@@ -685,11 +685,11 @@ fn mutate_and_retract_missing_records_return_typed_errors() {
 
     assert!(matches!(
         mutation_error,
-        sema_engine::Error::RecordNotFound { .. }
+        memory_engine::Error::RecordNotFound { .. }
     ));
     assert!(matches!(
         retraction_error,
-        sema_engine::Error::RecordNotFound { .. }
+        memory_engine::Error::RecordNotFound { .. }
     ));
     assert!(engine.commit_log().expect("commit log reads").is_empty());
 }
@@ -718,7 +718,7 @@ fn assert_against_existing_key_returns_typed_duplicate_assert_error() {
 
     assert!(matches!(
         error,
-        sema_engine::Error::DuplicateAssertKey { .. }
+        memory_engine::Error::DuplicateAssertKey { .. }
     ));
     assert_eq!(snapshot.records(), &[ToyRecord::new("alpha", "first")]);
     assert_eq!(log.len(), 1);
@@ -757,7 +757,7 @@ fn commit_assert_against_existing_key_rolls_back_entire_bundle() {
 
     assert!(matches!(
         error,
-        sema_engine::Error::DuplicateAssertKey { .. }
+        memory_engine::Error::DuplicateAssertKey { .. }
     ));
     assert_eq!(snapshot.records(), &[ToyRecord::new("alpha", "first")]);
     assert_eq!(log.len(), 1);
@@ -768,7 +768,7 @@ fn commit_assert_against_existing_key_rolls_back_entire_bundle() {
 }
 
 #[test]
-fn sema_engine_owns_demoted_read_plan_operator_vocabulary() {
+fn memory_engine_owns_demoted_read_plan_operator_vocabulary() {
     let fixture = EngineFixture::new();
     let mut engine = fixture.open_engine();
     let records = engine
@@ -820,7 +820,7 @@ fn unsupported_read_plan_operator_returns_typed_error() {
 
     assert!(matches!(
         error,
-        sema_engine::Error::UnsupportedReadPlan {
+        memory_engine::Error::UnsupportedReadPlan {
             operator: ReadOperator::Project
         }
     ));
@@ -830,13 +830,13 @@ fn unsupported_read_plan_operator_returns_typed_error() {
 fn engine_rejects_unregistered_record_family() {
     let fixture = EngineFixture::new();
     let engine = fixture.open_engine();
-    let records = sema_engine::TableReference::new(TableName::new("unregistered"));
+    let records = memory_engine::TableReference::new(TableName::new("unregistered"));
     let error = engine
         .assert(Assertion::new(records, ToyRecord::new("missing", "family")))
         .expect_err("unregistered table is rejected");
 
     assert!(matches!(
         error,
-        sema_engine::Error::TableNotRegistered { .. }
+        memory_engine::Error::TableNotRegistered { .. }
     ));
 }

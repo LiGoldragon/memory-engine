@@ -1,4 +1,4 @@
-# sema-engine Skills
+# memory-engine Skills
 
 This repository follows the workspace skills in `/home/li/primary/skills/`.
 
@@ -12,7 +12,7 @@ This repository follows the workspace skills in `/home/li/primary/skills/`.
   boundaries.
 - Do not introduce `signal-persona-*` dependencies here; component
   daemons lower their domain records into engine plans.
-- Keep redb behind the `sema` kernel. Engine consumers open `.sema`
+- Keep redb behind the `memory` kernel. Engine consumers open `.memory`
   files through `EngineOpen`; they do not import redb.
 - Use domain-keyed tables for records with stable semantic keys and
   identified tables for ethos contracts that need engine-assigned

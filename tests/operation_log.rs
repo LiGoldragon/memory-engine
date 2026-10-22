@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, rancor};
-use sema_engine::{
+use memory_engine::{
     Assertion, CommitRequest, CommitSequence, Engine, EngineOpen, EngineRecord, FamilyName,
     IdentifiedAssertion, IdentifiedTableDescriptor, QueryPlan, RecordKey, RecordKeyKind,
     Retraction, SchemaHash, SchemaVersion, SnapshotIdentifier, TableDescriptor, TableName,
     VersionedPayload, VersionedStoreName, VersioningPolicy,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, rancor};
 use signal_sema::SemaOperation;
 use tempfile::TempDir;
 
@@ -44,7 +44,7 @@ impl LogFixture {
     }
 
     fn database_path(&self) -> PathBuf {
-        self.directory.path().join("engine.sema")
+        self.directory.path().join("engine.memory")
     }
 
     fn open_engine(&self) -> Engine {
@@ -429,7 +429,7 @@ fn rejected_commit_does_not_advance_commit_sequence() {
         .commit(CommitRequest::new(records).mutate(LoggedRecord::new("missing", "body")))
         .expect_err("missing mutate is rejected");
 
-    assert!(matches!(error, sema_engine::Error::RecordNotFound { .. }));
+    assert!(matches!(error, memory_engine::Error::RecordNotFound { .. }));
     assert_eq!(
         engine.current_commit_sequence().unwrap(),
         CommitSequence::genesis()

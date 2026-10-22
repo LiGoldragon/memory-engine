@@ -1,5 +1,5 @@
 //! Falsification tests for the gaps named in
-//! the May 17 sema-engine fit audit.
+//! the May 17 memory-engine fit audit.
 //!
 //! Each test tries to disprove a claimed gap by composing existing
 //! `Engine` API. The criterion: **the composition must be
@@ -18,12 +18,12 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::{Arc, atomic::AtomicUsize, atomic::Ordering};
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Assertion, Engine, EngineOpen, EngineRecord, FamilyName, QueryPlan, RecordKey, SchemaHash,
     SchemaVersion, SinkError, SnapshotIdentifier, SubscriptionEvent, SubscriptionIdentifier,
     SubscriptionSink, TableDescriptor, TableName,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -82,7 +82,7 @@ impl Fixture {
     }
 
     fn database_path(&self) -> PathBuf {
-        self.directory.path().join("engine.sema")
+        self.directory.path().join("engine.memory")
     }
 
     fn open_engine(&self) -> Engine {
@@ -101,7 +101,7 @@ impl Fixture {
 
 // ─── Gap 1 falsification: validate_write ─────────────────
 //
-// Claim under test (from audit §4.1): "sema-engine lacks an
+// Claim under test (from audit §4.1): "memory-engine lacks an
 // `Engine::validate_write(CommitRequest)` so every component
 // re-implements integrity checks locally."
 //
@@ -238,8 +238,8 @@ struct SupervisorBackedSink {
 }
 
 impl SubscriptionSink<Thought> for SupervisorBackedSink {
-    fn delivery_mode(&self) -> sema_engine::SubscriptionDeliveryMode {
-        sema_engine::SubscriptionDeliveryMode::Inline
+    fn delivery_mode(&self) -> memory_engine::SubscriptionDeliveryMode {
+        memory_engine::SubscriptionDeliveryMode::Inline
     }
     fn deliver(&self, event: SubscriptionEvent<Thought>) -> Result<(), SinkError> {
         let handle_id = match &event {
@@ -441,7 +441,7 @@ fn read_after_write_is_two_engine_calls_with_monotonic_snapshot_identifiers() {
     //
     // Two engine calls. The Match observes the same snapshot
     // ID the Assert produced. The single-writer-per-actor
-    // discipline (per sema-engine ARCH §Constraints) means no
+    // discipline (per memory-engine ARCH §Constraints) means no
     // other writer can interleave between Assert and Match.
     // OCC is dissolved by actor discipline, not by an
     // engine-level snapshot pin.

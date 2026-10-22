@@ -15,14 +15,14 @@
 
 use std::path::PathBuf;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Assertion, CommitRequest, CommitSequence, Durability, Engine, EngineOpen, EngineRecord,
     EntryDigest, FamilyName, IdentifiedAssertion, IdentifiedMutation, IdentifiedRetraction,
     IdentifiedTableDescriptor, MirrorAcknowledgement, MirrorHead, Mutation, QueryPlan, RecordKey,
     Retraction, SchemaHash, SchemaVersion, TableDescriptor, TableName, VersionedRecoveryTopology,
     VersionedStoreName, VersioningPolicy,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -71,7 +71,7 @@ impl Fixture {
     }
 
     fn database_path(&self, name: &str) -> PathBuf {
-        self.directory.path().join(format!("{name}.sema"))
+        self.directory.path().join(format!("{name}.memory"))
     }
 
     fn open_versioned(&self, name: &str) -> Engine {
@@ -200,7 +200,7 @@ fn domain_row_commit_log_versioned_entry_and_outbox_row_commit_atomically() {
         .expect_err("duplicate assert rejects the bundle");
     assert!(matches!(
         error,
-        sema_engine::Error::DuplicateAssertKey { .. }
+        memory_engine::Error::DuplicateAssertKey { .. }
     ));
     assert_eq!(engine.commit_log().expect("commit log reads").len(), 1);
     assert_eq!(
@@ -338,7 +338,7 @@ fn forked_and_unknown_heads_are_typed_errors() {
         .expect_err("forked head is rejected");
     assert!(matches!(
         forked,
-        sema_engine::Error::MirrorHeadForked { sequence: 1, .. }
+        memory_engine::Error::MirrorHeadForked { sequence: 1, .. }
     ));
 
     let unknown = engine
@@ -349,7 +349,7 @@ fn forked_and_unknown_heads_are_typed_errors() {
         .expect_err("unknown head is rejected");
     assert!(matches!(
         unknown,
-        sema_engine::Error::MirrorHeadUnknown { sequence: 99 }
+        memory_engine::Error::MirrorHeadUnknown { sequence: 99 }
     ));
 }
 
@@ -384,6 +384,6 @@ fn unversioned_stores_never_queue_and_read_local_committed() {
         .expect_err("durability of an unwritten sequence is typed");
     assert!(matches!(
         unknown,
-        sema_engine::Error::UnknownCommitSequence { sequence: 2 }
+        memory_engine::Error::UnknownCommitSequence { sequence: 2 }
     ));
 }

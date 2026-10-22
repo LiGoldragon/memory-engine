@@ -17,22 +17,22 @@
 
 use std::path::PathBuf;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Assertion, Engine, EngineOpen, EngineRecord, EntryDigest, FamilyDirectory, FamilyName,
     QueryPlan, RecordKey, RowMaterializer, SchemaHash, SchemaVersion, TableDescriptor, TableName,
     TableReference, VersionedStoreName, VersioningPolicy,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 /// The engine-internal counters table, reconstructed by name so a test
 /// can read and rewrite the layout slot and the derived counters
 /// exactly as an old store's on-disk shape would have them.
-const COUNTERS: sema::Table<&'static str, u64> = sema::Table::new("__sema_engine_counters");
+const COUNTERS: memory::Table<&'static str, u64> = memory::Table::new("__memory_engine_counters");
 /// The engine-internal chain-head slot, reconstructed by name so a test
 /// can delete it to simulate a pre-layout-5 store.
-const CHAIN_HEAD: sema::Table<&'static str, EntryDigest> =
-    sema::Table::new("__sema_engine_chain_head");
+const CHAIN_HEAD: memory::Table<&'static str, EntryDigest> =
+    memory::Table::new("__memory_engine_chain_head");
 const STORAGE_LAYOUT_KEY: &str = "engine_storage_layout";
 const LATEST_ENTRY_DIGEST_KEY: &str = "latest_entry_digest";
 const COMMIT_LOG_COUNT_KEY: &str = "commit_log_count";
@@ -77,10 +77,10 @@ impl Notes {
 }
 
 impl FamilyDirectory for Notes {
-    fn materialize(&self, row: RowMaterializer<'_>) -> sema_engine::Result<()> {
+    fn materialize(&self, row: RowMaterializer<'_>) -> memory_engine::Result<()> {
         match row.family().family().as_str() {
             "note" => row.apply(self.notes),
-            other => Err(sema_engine::Error::FamilyUnknown {
+            other => Err(memory_engine::Error::FamilyUnknown {
                 family: other.to_owned(),
             }),
         }
@@ -99,7 +99,7 @@ impl Fixture {
     }
 
     fn database_path(&self, name: &str) -> PathBuf {
-        self.directory.path().join(format!("{name}.sema"))
+        self.directory.path().join(format!("{name}.memory"))
     }
 
     fn open_versioned(&self, name: &str) -> Engine {
@@ -121,11 +121,11 @@ impl Fixture {
     /// Open the kernel directly over a store's file — the affordance an
     /// old-store simulation needs to rewrite the layout slot and the
     /// derived slots that a pre-layout-5 store would not have carried.
-    fn open_kernel(&self, name: &str) -> sema::Sema {
-        let schema = sema::Schema {
+    fn open_kernel(&self, name: &str) -> memory::Memory {
+        let schema = memory::Schema {
             version: SchemaVersion::new(1),
         };
-        sema::Sema::open_with_schema(&self.database_path(name), &schema).expect("kernel opens")
+        memory::Memory::open_with_schema(&self.database_path(name), &schema).expect("kernel opens")
     }
 }
 
@@ -332,7 +332,7 @@ fn old_layout_store_without_versioned_log_still_hard_fails_typed() {
     assert!(
         matches!(
             error,
-            sema_engine::Error::StorageLayoutMismatch {
+            memory_engine::Error::StorageLayoutMismatch {
                 stored: 4,
                 expected: 7,
             }

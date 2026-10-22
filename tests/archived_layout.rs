@@ -7,7 +7,7 @@
 //! archived layout across the move of that type into this crate, so a
 //! store written by an earlier build stays readable.
 
-use sema_engine::{
+use memory_engine::{
     Catalog, CommitLogEntry, CommitLogOperation, CommitSequence, EntryDigest, FamilyIdentity,
     FamilyName, NonEmpty, RecordKey, SchemaHash, SnapshotIdentifier, StoreSchemaHash, TableName,
     VersionedCommitLogEntry, VersionedLogOperation, VersionedPayload, VersionedStoreName,

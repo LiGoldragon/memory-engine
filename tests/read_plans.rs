@@ -6,13 +6,13 @@
 
 use std::sync::Arc;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Assertion, Engine, EngineOpen, EngineRecord, Error, FamilyName, KeyRange, QueryPlan,
     ReadOperator, RecordKey, RecordPredicate, SchemaHash, SchemaVersion, SinkError,
     SubscriptionEvent, SubscriptionSink, TableDescriptor, TableName, TableReference,
     VersionedStoreName, VersioningPolicy,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -65,7 +65,8 @@ struct Store {
 impl Store {
     fn open(versioned: bool) -> Self {
         let directory = tempfile::tempdir().expect("temp dir");
-        let mut open = EngineOpen::new(directory.path().join("reads.sema"), SchemaVersion::new(1));
+        let mut open =
+            EngineOpen::new(directory.path().join("reads.memory"), SchemaVersion::new(1));
         if versioned {
             open = open.with_versioning(VersioningPolicy::new(VersionedStoreName::new("reads")));
         }

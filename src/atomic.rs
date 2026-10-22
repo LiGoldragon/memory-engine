@@ -2,7 +2,7 @@
 //!
 //! A group is deliberately opaque: callers can add records from any registered
 //! table, while the engine retains the typed table handles needed to materialize
-//! every operation in the same SEMA write transaction.
+//! every operation in the same MEMORY write transaction.
 
 use std::collections::HashSet;
 
@@ -164,7 +164,7 @@ trait AtomicWrite: Send + Sync {
     fn table(&self) -> TableName;
     fn key(&self) -> &RecordKey;
     fn prepare(&self, engine: &Engine) -> Result<PreparedAtomicWrite>;
-    fn materialize(&self, transaction: &sema::WriteTransaction) -> sema::Result<()>;
+    fn materialize(&self, transaction: &memory::WriteTransaction) -> memory::Result<()>;
 }
 
 struct TypedAtomicWrite<RecordValue> {
@@ -250,16 +250,16 @@ where
         })
     }
 
-    fn materialize(&self, transaction: &sema::WriteTransaction) -> sema::Result<()> {
+    fn materialize(&self, transaction: &memory::WriteTransaction) -> memory::Result<()> {
         match self.kind {
-            AtomicKind::Assert | AtomicKind::Mutate => self.table.sema_table().insert(
+            AtomicKind::Assert | AtomicKind::Mutate => self.table.memory_table().insert(
                 transaction,
                 self.key.to_owned_string(),
                 self.record.as_ref().expect("record-bearing write"),
             ),
             AtomicKind::Retract => {
                 self.table
-                    .sema_table()
+                    .memory_table()
                     .remove(transaction, self.key.to_owned_string())?;
                 Ok(())
             }
@@ -303,7 +303,7 @@ impl Engine {
         AtomicCommit::new()
     }
 
-    /// Preflight and materialize a heterogeneous group in one SEMA transaction.
+    /// Preflight and materialize a heterogeneous group in one MEMORY transaction.
     /// Deltas are delivered only after that transaction commits.
     pub fn commit_atomic(&self, commit: AtomicCommit) -> Result<AtomicCommitReceipt> {
         let _write_guard = self.write_guard();

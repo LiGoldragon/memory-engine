@@ -7,11 +7,11 @@
 
 mod note_family;
 
-use note_family::{Note, NoteStore, NoteUpgradeRefusal, NoteV1};
-use sema_engine::{
+use memory_engine::{
     Engine, Error, MemoryDefinition, MemoryUpgrades, MemoryVersion, QueryPlan, RecordKey,
     StoragePhase, UpgradeFault, UpgradeOutcome,
 };
+use note_family::{Note, NoteStore, NoteUpgradeRefusal, NoteV1};
 
 fn seed(store: &NoteStore, rows: &[NoteV1]) {
     let mut engine = store.open();
@@ -20,7 +20,7 @@ fn seed(store: &NoteStore, rows: &[NoteV1]) {
         .expect("v1 notes register");
     for row in rows {
         engine
-            .assert_keyed(sema_engine::KeyedAssertion::new(
+            .assert_keyed(memory_engine::KeyedAssertion::new(
                 notes,
                 RecordKey::new(row.id.clone()),
                 row.clone(),
@@ -29,7 +29,7 @@ fn seed(store: &NoteStore, rows: &[NoteV1]) {
     }
 }
 
-fn sorted(engine: &Engine, notes: sema_engine::TableReference<Note>) -> Vec<Note> {
+fn sorted(engine: &Engine, notes: memory_engine::TableReference<Note>) -> Vec<Note> {
     let mut rows = engine
         .match_records(QueryPlan::all(notes))
         .expect("v2 notes read")

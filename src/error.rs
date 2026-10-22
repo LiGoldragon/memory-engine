@@ -7,8 +7,8 @@ use crate::{
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("sema: {0}")]
-    Sema(sema::Error),
+    #[error("memory: {0}")]
+    Memory(memory::Error),
 
     #[error(
         "engine storage layout {stored} does not match this build's layout {expected}; \
@@ -328,30 +328,30 @@ impl Error {
 
     /// Carry a typed engine error across the storage kernel's
     /// closure-scoped transaction boundary. The kernel rolls back the
-    /// transaction on `Err`; `From<sema::Error>` unwraps the carried
+    /// transaction on `Err`; `From<memory::Error>` unwraps the carried
     /// engine error back out, so the typed failure survives the round
     /// trip end to end.
-    pub(crate) fn into_storage(self) -> sema::Error {
-        sema::Error::Io(std::io::Error::other(Carrier(self)))
+    pub(crate) fn into_storage(self) -> memory::Error {
+        memory::Error::Io(std::io::Error::other(Carrier(self)))
     }
 }
 
-impl From<sema::Error> for Error {
-    fn from(error: sema::Error) -> Self {
+impl From<memory::Error> for Error {
+    fn from(error: memory::Error) -> Self {
         match error {
-            sema::Error::Io(io) if io.get_ref().is_some_and(|inner| inner.is::<Carrier>()) => {
+            memory::Error::Io(io) if io.get_ref().is_some_and(|inner| inner.is::<Carrier>()) => {
                 let inner = io.into_inner().expect("carrier presence was just checked");
                 inner
                     .downcast::<Carrier>()
                     .expect("carrier type was just checked")
                     .0
             }
-            other => Self::Sema(other),
+            other => Self::Memory(other),
         }
     }
 }
 
-/// Wrapper smuggling a typed engine error through `sema::Error::Io`
+/// Wrapper smuggling a typed engine error through `memory::Error::Io`
 /// so a failure inside a storage-kernel closure both rolls back the
 /// transaction and resurfaces as the original engine error.
 #[derive(Debug)]

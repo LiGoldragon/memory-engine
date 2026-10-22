@@ -259,7 +259,7 @@ impl CanonicalView {
 
     pub(crate) fn digest(&self) -> ViewDigest {
         let mut hasher = blake3::Hasher::new();
-        EntryDigest::update_bytes(&mut hasher, b"sema-engine-view-digest-v1");
+        EntryDigest::update_bytes(&mut hasher, b"memory-engine-view-digest-v1");
         hasher.update(&(self.rows.len() as u64).to_le_bytes());
         for (key, payload) in &self.rows {
             EntryDigest::update_bytes(&mut hasher, key.family.as_str().as_bytes());
@@ -421,12 +421,12 @@ pub trait FamilyDirectory {
 /// payload) or remove (tombstone), into the row's own family table —
 /// no general write authority escapes the engine's choke points.
 pub struct RowMaterializer<'transaction> {
-    transaction: &'transaction sema::WriteTransaction,
+    transaction: &'transaction memory::WriteTransaction,
     row: ViewRow,
 }
 
 impl<'transaction> RowMaterializer<'transaction> {
-    pub(crate) fn new(transaction: &'transaction sema::WriteTransaction, row: ViewRow) -> Self {
+    pub(crate) fn new(transaction: &'transaction memory::WriteTransaction, row: ViewRow) -> Self {
         Self { transaction, row }
     }
 
@@ -461,11 +461,11 @@ impl<'transaction> RowMaterializer<'transaction> {
             VersionedPayload::Record { bytes } => {
                 let record = Self::decode::<RecordValue>(bytes, table.name().as_str())?;
                 table
-                    .sema_table()
+                    .memory_table()
                     .insert(self.transaction, key.clone(), &record)?;
             }
             VersionedPayload::Tombstone => {
-                table.sema_table().remove(self.transaction, key.clone())?;
+                table.memory_table().remove(self.transaction, key.clone())?;
             }
         }
         Ok(())
@@ -499,12 +499,12 @@ impl<'transaction> RowMaterializer<'transaction> {
             VersionedPayload::Record { bytes } => {
                 let record = Self::decode::<RecordValue>(bytes, table.name().as_str())?;
                 table
-                    .sema_table()
+                    .memory_table()
                     .insert(self.transaction, identifier.value(), &record)?;
             }
             VersionedPayload::Tombstone => {
                 table
-                    .sema_table()
+                    .memory_table()
                     .remove(self.transaction, identifier.value())?;
             }
         }

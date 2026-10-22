@@ -20,9 +20,9 @@ use sema_translator::bootstrap::{
 use signal_sema_translator::{VocabularyEncodedId, VocabularyRoot};
 use structural_codec::EncodedNameResolver;
 
-pub const UPDATE_VARIABLE: &str = "UPDATE_SEMA_ENGINE_GENERATED_TABLE";
+pub const UPDATE_VARIABLE: &str = "UPDATE_MEMORY_ENGINE_GENERATED_TABLE";
 
-pub fn generated_sema_table() -> GeneratedBootstrapSema {
+pub fn generated_memory_table() -> GeneratedBootstrapSema {
     let catalog = catalog();
     let approval = approval(&catalog);
     let assembly = BootstrapTransactionAssembler::new(
@@ -34,8 +34,8 @@ pub fn generated_sema_table() -> GeneratedBootstrapSema {
         },
         catalog,
     )
-    .assemble(include_str!("../../schema/witness.sema"), approval)
-    .expect("checked Sema source is authority-approved");
+    .assemble(include_str!("../../schema/witness.memory"), approval)
+    .expect("checked Memory source is authority-approved");
     let rust = rust_logos();
     let paths = TypePaths::default()
         .with(universal_id(7), &["std", "string", "String"])
@@ -50,15 +50,15 @@ pub fn generated_sema_table() -> GeneratedBootstrapSema {
         generated_rust_path(),
     )
     .generate()
-    .expect("authority-verified Sema lowers to the checked Rust projection")
+    .expect("authority-verified Memory lowers to the checked Rust projection")
 }
 
 fn source_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schema/witness.sema")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schema/witness.memory")
 }
 
 fn generated_rust_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/generated_sema_table.rs")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/generated_memory_table.rs")
 }
 
 fn universal_id(local: u16) -> VocabularyEncodedId {
@@ -74,7 +74,7 @@ fn rust_id(local: u16) -> VocabularyEncodedId {
 fn metadata_record(spelling: &str, identity: VocabularyEncodedId) -> TextualMetadataRecord {
     TextualMetadataRecord {
         address: TextualProjectionAddress {
-            module_path: vec!["sema_engine".to_owned()],
+            module_path: vec!["memory_engine".to_owned()],
             lexical_owner: None,
             visible_name: spelling.to_owned(),
         },
@@ -122,7 +122,7 @@ fn catalog() -> BootstrapCatalog {
         ),
         (
             3,
-            "Sema",
+            "Memory",
             vec![SchemaRole::FileKind(core_ethos::bootstrap::EthosKind::Sema)],
         ),
         (
@@ -184,7 +184,7 @@ fn catalog() -> BootstrapCatalog {
     )
     .expect("prior order is unique");
     BootstrapCatalog::new(
-        vec!["sema_engine".to_owned()],
+        vec!["memory_engine".to_owned()],
         metadata,
         schemas,
         priors,

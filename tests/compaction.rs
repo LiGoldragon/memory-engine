@@ -4,13 +4,13 @@
 
 use std::path::PathBuf;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Assertion, CompactionFault, Engine, EngineOpen, EngineRecord, FamilyName, Mutation, QueryPlan,
     RecordKey, Retraction, SchemaHash, SchemaVersion, TableDescriptor, TableName,
     VersionedHistoryAcknowledgement, VersionedHistoryRetention, VersionedRecoveryTopology,
     VersionedStoreName, VersioningPolicy,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -47,7 +47,7 @@ impl Fixture {
     }
 
     fn path(&self) -> PathBuf {
-        self.directory.path().join("history.sema")
+        self.directory.path().join("history.memory")
     }
 
     fn open(&self) -> Engine {
@@ -168,7 +168,7 @@ fn local_checkpoint_acknowledgement_is_rejected_for_mirrored_store_without_mutat
         .expect_err("a mirror topology cannot claim local-checkpoint recovery");
     assert!(matches!(
         error,
-        sema_engine::Error::HistoryCompactionTopologyMismatch { .. }
+        memory_engine::Error::HistoryCompactionTopologyMismatch { .. }
     ));
     assert_eq!(
         engine.versioned_commit_log().expect("log reads").len(),
@@ -268,7 +268,7 @@ fn every_durable_compaction_phase_recovers_retraction_heavy_history_after_restar
                     .with_retention(VersionedHistoryRetention::new(0)),
             ),
             &ThoughtDirectory {
-                table: sema_engine::TableReference::new(TableName::new("thoughts")),
+                table: memory_engine::TableReference::new(TableName::new("thoughts")),
             },
         )
         .expect("supervised recovery resolves the intent before serving");
@@ -311,11 +311,11 @@ fn every_durable_compaction_phase_recovers_retraction_heavy_history_after_restar
 }
 
 struct ThoughtDirectory {
-    table: sema_engine::TableReference<Thought>,
+    table: memory_engine::TableReference<Thought>,
 }
 
-impl sema_engine::FamilyDirectory for ThoughtDirectory {
-    fn materialize(&self, row: sema_engine::RowMaterializer<'_>) -> sema_engine::Result<()> {
+impl memory_engine::FamilyDirectory for ThoughtDirectory {
+    fn materialize(&self, row: memory_engine::RowMaterializer<'_>) -> memory_engine::Result<()> {
         row.apply(self.table)
     }
 }

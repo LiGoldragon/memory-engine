@@ -44,7 +44,7 @@ impl RepositoryFixture {
 }
 
 #[test]
-fn sema_engine_ships_no_daemon_binary() {
+fn memory_engine_ships_no_daemon_binary() {
     let fixture = RepositoryFixture::current();
     let cargo = fixture.cargo_toml();
 
@@ -53,7 +53,7 @@ fn sema_engine_ships_no_daemon_binary() {
 }
 
 #[test]
-fn sema_engine_carries_repo_local_direction_context() {
+fn memory_engine_carries_repo_local_direction_context() {
     let fixture = RepositoryFixture::current();
 
     // Durable direction lives in ARCHITECTURE.md; there is no per-repo
@@ -65,7 +65,7 @@ fn sema_engine_carries_repo_local_direction_context() {
 }
 
 #[test]
-fn sema_engine_has_no_runtime_or_text_dependencies() {
+fn memory_engine_has_no_runtime_or_text_dependencies() {
     let fixture = RepositoryFixture::current();
     let cargo = fixture.cargo_toml();
 
@@ -91,29 +91,29 @@ fn signal_frame_is_absent_from_the_graph_a_consumer_inherits() {
 
     assert!(
         !tree.contains("signal-frame"),
-        "the retired envelope layer must not reach a sema-engine consumer:\n{tree}"
+        "the retired envelope layer must not reach a memory-engine consumer:\n{tree}"
     );
 }
 
 #[test]
-fn sema_engine_normal_dependency_tree_has_no_nota_next() {
+fn memory_engine_normal_dependency_tree_has_no_nota_next() {
     let fixture = RepositoryFixture::current();
     let tree = fixture.cargo_tree(&["--edges", "normal", "--no-default-features"]);
 
     assert!(
         !tree.contains("nota-next") && !tree.contains("nota_next"),
-        "sema-engine normal dependency tree must not contain nota-next:\n{tree}"
+        "memory-engine normal dependency tree must not contain nota-next:\n{tree}"
     );
 }
 
 #[test]
-fn sema_engine_normal_dependency_tree_is_one_exact_runtime_family() {
+fn memory_engine_normal_dependency_tree_is_one_exact_runtime_family() {
     let fixture = RepositoryFixture::current();
     let duplicates =
         fixture.cargo_tree(&["--edges", "normal", "--no-default-features", "--duplicates"]);
     assert!(
         duplicates.trim().is_empty(),
-        "sema-engine normal graph contains duplicate package families:\n{duplicates}"
+        "memory-engine normal graph contains duplicate package families:\n{duplicates}"
     );
 
     let tree = fixture.cargo_tree(&["--edges", "normal", "--no-default-features"]);
@@ -126,7 +126,7 @@ fn sema_engine_normal_dependency_tree_is_one_exact_runtime_family() {
 }
 
 #[test]
-fn strict_sema_generation_uses_one_exact_published_producer_train() {
+fn strict_memory_generation_uses_one_exact_published_producer_train() {
     let fixture = RepositoryFixture::current();
     let cargo = fixture.cargo_toml();
     let lock = fixture.cargo_lock();
@@ -141,7 +141,7 @@ fn strict_sema_generation_uses_one_exact_published_producer_train() {
     ] {
         assert!(
             cargo.contains(exact_dependency),
-            "strict Sema consumer omitted exact producer {exact_dependency}"
+            "strict Memory consumer omitted exact producer {exact_dependency}"
         );
     }
     for sole_package in [
@@ -157,26 +157,26 @@ fn strict_sema_generation_uses_one_exact_published_producer_train() {
         assert_eq!(
             lock.matches(&format!("name = \"{sole_package}\"")).count(),
             1,
-            "strict Sema generation admitted more than one {sole_package} source"
+            "strict Memory generation admitted more than one {sole_package} source"
         );
     }
     assert!(
         !lock.contains("name = \"schema-language\""),
-        "the deleted pre-bootstrap schema world must not enter the Sema proof graph"
+        "the deleted pre-bootstrap schema world must not enter the Memory proof graph"
     );
 }
 
 #[test]
-fn current_sema_source_is_the_only_live_schema_document() {
+fn current_memory_source_is_the_only_live_schema_document() {
     let fixture = RepositoryFixture::current();
 
-    assert!(fixture.has_file("schema/witness.sema"));
-    assert!(fixture.has_file("tests/fixtures/generated_sema_table.rs"));
-    assert!(!fixture.has_file("schema/sema-engine.concept.schema"));
+    assert!(fixture.has_file("schema/witness.memory"));
+    assert!(fixture.has_file("tests/fixtures/generated_memory_table.rs"));
+    assert!(!fixture.has_file("schema/memory-engine.concept.schema"));
 }
 
 #[test]
-fn sema_engine_does_not_depend_on_raw_redb_directly() {
+fn memory_engine_does_not_depend_on_raw_redb_directly() {
     let fixture = RepositoryFixture::current();
     let cargo = fixture.cargo_toml();
 
@@ -184,22 +184,22 @@ fn sema_engine_does_not_depend_on_raw_redb_directly() {
 }
 
 #[test]
-fn sema_engine_depends_on_storage_kernel_and_signal_sema_by_git() {
+fn memory_engine_depends_on_storage_kernel_and_signal_sema_by_git() {
     let fixture = RepositoryFixture::current();
     let cargo = fixture.cargo_toml();
 
-    assert!(cargo.contains("https://github.com/LiGoldragon/sema.git"));
+    assert!(cargo.contains("https://github.com/LiGoldragon/memory.git"));
     assert!(cargo.contains("https://github.com/LiGoldragon/signal-sema.git"));
-    assert!(!cargo.contains("path = \"../sema\""));
+    assert!(!cargo.contains("path = \"../memory\""));
     assert!(!cargo.contains("path = \"../signal-sema\""));
     assert!(
         !cargo.contains("signal-core"),
-        "sema-engine must not depend on the retired signal-core crate"
+        "memory-engine must not depend on the retired signal-core crate"
     );
 }
 
 #[test]
-fn sema_engine_owns_read_plan_vocabulary() {
+fn memory_engine_owns_read_plan_vocabulary() {
     let fixture = RepositoryFixture::current();
     let source =
         fs::read_to_string(fixture.root.join("src/query.rs")).expect("query source is readable");
@@ -208,7 +208,7 @@ fn sema_engine_owns_read_plan_vocabulary() {
     for operator in ["Constrain", "Project", "Aggregate", "Infer", "Recurse"] {
         assert!(
             source.contains(operator),
-            "{operator} must live in sema-engine read-plan vocabulary"
+            "{operator} must live in memory-engine read-plan vocabulary"
         );
     }
     assert!(cargo.contains("signal-sema"));

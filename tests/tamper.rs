@@ -13,29 +13,29 @@
 
 use std::path::PathBuf;
 
-use rkyv::rancor;
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::NonEmpty;
-use sema_engine::{
+use memory_engine::NonEmpty;
+use memory_engine::{
     Assertion, Checkpoint, CheckpointMetadata, CheckpointSegment, Engine, EngineOpen, EngineRecord,
     FamilyDirectory, FamilyName, MirrorHead, OutboxEntry, RecordKey, RowMaterializer, SchemaHash,
     SchemaVersion, SegmentDigest, TableDescriptor, TableName, TableReference,
     VersionedCommitLogEntry, VersionedLogOperation, VersionedPayload, VersionedRecoveryTopology,
     VersionedStoreName, VersioningPolicy, ViewRow,
 };
+use rkyv::rancor;
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_sema::SemaOperation;
 use tempfile::TempDir;
 
 /// The engine's internal tables, redeclared for doctoring. The engine
 /// never exposes a write path to them — `StorageReader` is read-only —
 /// so the tests reach them through the raw storage kernel.
-const VERSIONED_COMMIT_LOG: sema::Table<u64, VersionedCommitLogEntry> =
-    sema::Table::new("__sema_engine_versioned_commit_log");
-const CHECKPOINTS: sema::Table<u64, CheckpointMetadata> =
-    sema::Table::new("__sema_engine_checkpoints");
-const CHECKPOINT_SEGMENTS: sema::Table<&'static [u8; 32], CheckpointSegment> =
-    sema::Table::new("__sema_engine_checkpoint_segments");
-const COUNTERS: sema::Table<&'static str, u64> = sema::Table::new("__sema_engine_counters");
+const VERSIONED_COMMIT_LOG: memory::Table<u64, VersionedCommitLogEntry> =
+    memory::Table::new("__memory_engine_versioned_commit_log");
+const CHECKPOINTS: memory::Table<u64, CheckpointMetadata> =
+    memory::Table::new("__memory_engine_checkpoints");
+const CHECKPOINT_SEGMENTS: memory::Table<&'static [u8; 32], CheckpointSegment> =
+    memory::Table::new("__memory_engine_checkpoint_segments");
+const COUNTERS: memory::Table<&'static str, u64> = memory::Table::new("__memory_engine_counters");
 const LATEST_CHECKPOINT_KEY: &str = "latest_checkpoint";
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -73,10 +73,10 @@ impl Families {
 }
 
 impl FamilyDirectory for Families {
-    fn materialize(&self, row: RowMaterializer<'_>) -> sema_engine::Result<()> {
+    fn materialize(&self, row: RowMaterializer<'_>) -> memory_engine::Result<()> {
         match row.family().family().as_str() {
             "thought" => row.apply(self.thoughts),
-            other => Err(sema_engine::Error::FamilyUnknown {
+            other => Err(memory_engine::Error::FamilyUnknown {
                 family: other.to_owned(),
             }),
         }
@@ -143,7 +143,7 @@ impl Fixture {
     }
 
     fn database_path(&self, name: &str) -> PathBuf {
-        self.directory.path().join(format!("{name}.sema"))
+        self.directory.path().join(format!("{name}.memory"))
     }
 
     fn open_versioned(&self, name: &str) -> Engine {
@@ -176,13 +176,13 @@ impl Fixture {
         )
     }
 
-    /// Open the `.sema` file through the raw storage kernel — the
+    /// Open the `.memory` file through the raw storage kernel — the
     /// doctoring surface. The engine handle must be dropped first;
     /// redb holds an exclusive file lock.
-    fn raw_kernel(&self, name: &str) -> sema::Sema {
-        sema::Sema::open_with_schema(
+    fn raw_kernel(&self, name: &str) -> memory::Memory {
+        memory::Memory::open_with_schema(
             &self.database_path(name),
-            &sema::Schema {
+            &memory::Schema {
                 version: SchemaVersion::new(1),
             },
         )
@@ -271,14 +271,14 @@ fn forged_log_row_breaks_the_digest_chain_at_its_successor() {
         .expect_err("rebuild detects the forgery");
     assert!(matches!(
         error,
-        sema_engine::Error::VersionedChainBroken { sequence: 2 }
+        memory_engine::Error::VersionedChainBroken { sequence: 2 }
     ));
     let error = engine
         .checkpoint()
         .expect_err("checkpoint detects the forgery");
     assert!(matches!(
         error,
-        sema_engine::Error::VersionedChainBroken { sequence: 2 }
+        memory_engine::Error::VersionedChainBroken { sequence: 2 }
     ));
 }
 
@@ -319,7 +319,7 @@ fn rewritten_payload_fails_per_entry_digest_recomputation() {
         .expect_err("rebuild recomputes every digest");
     assert!(matches!(
         error,
-        sema_engine::Error::VersionedChainBroken { sequence: 1 }
+        memory_engine::Error::VersionedChainBroken { sequence: 1 }
     ));
 }
 
@@ -362,7 +362,7 @@ fn import_rejects_a_suffix_entry_whose_digest_does_not_recompute() {
         .expect_err("tampered suffix is rejected");
     assert!(matches!(
         error,
-        sema_engine::Error::VersionedChainBroken { sequence: 2 }
+        memory_engine::Error::VersionedChainBroken { sequence: 2 }
     ));
 
     // Nothing was imported: the store is still fresh, so the genuine
@@ -398,7 +398,7 @@ fn doctored_checkpoint_metadata_is_rejected_at_load_and_at_ingest() {
     let error = engine
         .latest_checkpoint()
         .expect_err("load verifies the checkpoint digest");
-    let sema_engine::Error::CheckpointDigestMismatch { stored, computed } = error else {
+    let memory_engine::Error::CheckpointDigestMismatch { stored, computed } = error else {
         panic!("expected CheckpointDigestMismatch, got {error:?}");
     };
     assert_eq!(computed, metadata.checkpoint_digest());
@@ -412,7 +412,7 @@ fn doctored_checkpoint_metadata_is_rejected_at_load_and_at_ingest() {
         .expect_err("ingest verifies the checkpoint digest");
     assert!(matches!(
         error,
-        sema_engine::Error::CheckpointDigestMismatch { .. }
+        memory_engine::Error::CheckpointDigestMismatch { .. }
     ));
 }
 
@@ -435,7 +435,7 @@ fn dead_latest_checkpoint_cursor_is_a_typed_missing_row() {
         .expect_err("the cursor names a row that does not exist");
     assert!(matches!(
         error,
-        sema_engine::Error::CheckpointRowMissing { sequence } if sequence == dead
+        memory_engine::Error::CheckpointRowMissing { sequence } if sequence == dead
     ));
 }
 
@@ -466,7 +466,7 @@ fn forged_segment_under_a_genuine_address_is_rejected_at_load() {
     let error = engine
         .latest_checkpoint()
         .expect_err("load verifies every content address");
-    let sema_engine::Error::SegmentDigestMismatch {
+    let memory_engine::Error::SegmentDigestMismatch {
         referenced,
         computed,
     } = error
@@ -504,7 +504,7 @@ fn flipped_segment_reference_dangles_at_load_before_verification_runs() {
     let error = engine
         .latest_checkpoint()
         .expect_err("the flipped reference dangles");
-    let sema_engine::Error::SegmentMissing { digest } = error else {
+    let memory_engine::Error::SegmentMissing { digest } = error else {
         panic!("expected SegmentMissing, got {error:?}");
     };
     assert_eq!(digest, flipped);
@@ -524,7 +524,7 @@ fn fixed_up_outer_digest_still_fails_on_the_view_digest() {
     let error = Checkpoint::new(lying.clone(), genuine.segments().to_vec())
         .verify()
         .expect_err("outer digest catches the raw lie");
-    let sema_engine::Error::CheckpointDigestMismatch { computed, .. } = error else {
+    let memory_engine::Error::CheckpointDigestMismatch { computed, .. } = error else {
         panic!("expected CheckpointDigestMismatch, got {error:?}");
     };
 
@@ -536,7 +536,7 @@ fn fixed_up_outer_digest_still_fails_on_the_view_digest() {
     let error = Checkpoint::new(consistent.clone(), genuine.segments().to_vec())
         .verify()
         .expect_err("view digest catches the fixed-up forgery");
-    let sema_engine::Error::ViewDigestMismatch { expected, computed } = error else {
+    let memory_engine::Error::ViewDigestMismatch { expected, computed } = error else {
         panic!("expected ViewDigestMismatch, got {error:?}");
     };
     assert_eq!(expected, consistent.view_digest());
@@ -550,7 +550,7 @@ fn fixed_up_outer_digest_still_fails_on_the_view_digest() {
         .expect_err("ingest rejects the forgery");
     assert!(matches!(
         error,
-        sema_engine::Error::ViewDigestMismatch { .. }
+        memory_engine::Error::ViewDigestMismatch { .. }
     ));
 }
 
@@ -566,7 +566,7 @@ fn segment_count_mismatch_is_typed_in_both_directions() {
     let error = Checkpoint::new(metadata.clone(), Vec::new())
         .verify()
         .expect_err("missing segment is typed");
-    let sema_engine::Error::SegmentMissing { digest } = error else {
+    let memory_engine::Error::SegmentMissing { digest } = error else {
         panic!("expected SegmentMissing, got {error:?}");
     };
     assert_eq!(digest, metadata.segments()[0].digest());
@@ -579,7 +579,7 @@ fn segment_count_mismatch_is_typed_in_both_directions() {
         .expect_err("surplus segment is typed");
     assert!(matches!(
         error,
-        sema_engine::Error::SegmentSurplus {
+        memory_engine::Error::SegmentSurplus {
             referenced: 1,
             supplied: 2
         }
@@ -599,7 +599,7 @@ fn import_rejects_a_schema_hash_that_does_not_re_derive_from_the_inventory() {
     let error = Checkpoint::new(lying.clone(), genuine.segments().to_vec())
         .verify()
         .expect_err("outer digest catches the raw lie");
-    let sema_engine::Error::CheckpointDigestMismatch { computed, .. } = error else {
+    let memory_engine::Error::CheckpointDigestMismatch { computed, .. } = error else {
         panic!("expected CheckpointDigestMismatch, got {error:?}");
     };
     let consistent =
@@ -621,7 +621,7 @@ fn import_rejects_a_schema_hash_that_does_not_re_derive_from_the_inventory() {
         .expect_err("schema re-derivation rejects the forgery");
     assert!(matches!(
         error,
-        sema_engine::Error::CheckpointSchemaMismatch { .. }
+        memory_engine::Error::CheckpointSchemaMismatch { .. }
     ));
 }
 
@@ -669,6 +669,6 @@ fn acknowledging_a_head_over_a_rewritten_log_is_a_typed_mismatch() {
         .expect_err("mismatched outbox row is typed");
     assert!(matches!(
         error,
-        sema_engine::Error::OutboxEntryMismatch { sequence: 1 }
+        memory_engine::Error::OutboxEntryMismatch { sequence: 1 }
     ));
 }

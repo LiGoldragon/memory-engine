@@ -14,12 +14,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Assertion, CommitSequence, Engine, EngineOpen, EngineRecord, FamilyDirectory, FamilyName,
     RebuildReceipt, RecordKey, RowMaterializer, SchemaHash, SchemaVersion, TableDescriptor,
     TableName, TableReference, VersionedStoreName, VersioningPolicy,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -59,10 +59,10 @@ impl Notes {
 }
 
 impl FamilyDirectory for Notes {
-    fn materialize(&self, row: RowMaterializer<'_>) -> sema_engine::Result<()> {
+    fn materialize(&self, row: RowMaterializer<'_>) -> memory_engine::Result<()> {
         match row.family().family().as_str() {
             "note" => row.apply(self.notes),
-            other => Err(sema_engine::Error::FamilyUnknown {
+            other => Err(memory_engine::Error::FamilyUnknown {
                 family: other.to_owned(),
             }),
         }
@@ -81,7 +81,7 @@ impl Fixture {
     }
 
     fn database_path(&self, name: &str) -> PathBuf {
-        self.directory.path().join(format!("{name}.sema"))
+        self.directory.path().join(format!("{name}.memory"))
     }
 
     fn open_versioned(&self, name: &str) -> Engine {

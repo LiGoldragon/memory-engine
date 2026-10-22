@@ -754,13 +754,13 @@ impl ValidationReceipt {
 /// The committed rows of one registered table, read inside one storage
 /// read transaction so the rows and the database marker agree.
 pub(crate) struct CommittedRows<'transaction, RecordValue> {
-    transaction: &'transaction sema::ReadTransaction,
+    transaction: &'transaction memory::ReadTransaction,
     table: &'transaction TableReference<RecordValue>,
 }
 
 impl<'transaction, RecordValue> CommittedRows<'transaction, RecordValue> {
     pub(crate) fn new(
-        transaction: &'transaction sema::ReadTransaction,
+        transaction: &'transaction memory::ReadTransaction,
         table: &'transaction TableReference<RecordValue>,
     ) -> Self {
         Self { transaction, table }
@@ -778,7 +778,7 @@ where
     fn all_rows(&self) -> crate::Result<Vec<RecordValue>> {
         Ok(self
             .table
-            .sema_table()
+            .memory_table()
             .iter(self.transaction)?
             .into_iter()
             .map(|(_key, record)| record)
@@ -788,7 +788,7 @@ where
     fn by_key(&self, key: &RecordKey) -> crate::Result<Vec<RecordValue>> {
         Ok(self
             .table
-            .sema_table()
+            .memory_table()
             .get(self.transaction, key.to_owned_string())?
             .into_iter()
             .collect())
@@ -797,7 +797,7 @@ where
     fn by_key_range(&self, range: &KeyRange) -> crate::Result<Vec<RecordValue>> {
         Ok(self
             .table
-            .sema_table()
+            .memory_table()
             .iter(self.transaction)?
             .into_iter()
             .filter(|(key, _record)| range.contains(&RecordKey::new(key.clone())))

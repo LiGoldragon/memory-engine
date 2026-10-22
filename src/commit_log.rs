@@ -17,14 +17,15 @@
 //! lends in, so atomicity stays the engine's to coordinate — the log
 //! never opens a transaction of its own.
 
-use sema::WriteTransaction;
+use memory::WriteTransaction;
 
 use crate::log::CommitLogEntry;
 use crate::{CommitSequence, EntryDigest, Result, SequenceRange, VersionedCommitLogEntry};
 
-const COMMIT_LOG: sema::Table<u64, CommitLogEntry> = sema::Table::new("__sema_engine_commit_log");
-const VERSIONED_COMMIT_LOG: sema::Table<u64, VersionedCommitLogEntry> =
-    sema::Table::new("__sema_engine_versioned_commit_log");
+const COMMIT_LOG: memory::Table<u64, CommitLogEntry> =
+    memory::Table::new("__memory_engine_commit_log");
+const VERSIONED_COMMIT_LOG: memory::Table<u64, VersionedCommitLogEntry> =
+    memory::Table::new("__memory_engine_versioned_commit_log");
 /// The persisted versioned chain-head digest: the entry digest of the
 /// most recent versioned commit log entry, updated inside the same
 /// write transaction as that entry. Reading it is O(1), replacing a
@@ -32,10 +33,10 @@ const VERSIONED_COMMIT_LOG: sema::Table<u64, VersionedCommitLogEntry> =
 /// optimization for minting the next entry's predecessor digest only;
 /// integrity is never read from here — [`crate::fold::CanonicalView::fold`]
 /// recomputes every entry digest and verifies the chain link by link.
-const CHAIN_HEAD: sema::Table<&'static str, EntryDigest> =
-    sema::Table::new("__sema_engine_chain_head");
+const CHAIN_HEAD: memory::Table<&'static str, EntryDigest> =
+    memory::Table::new("__memory_engine_chain_head");
 const LATEST_ENTRY_DIGEST_KEY: &str = "latest_entry_digest";
-const COUNTERS: sema::Table<&'static str, u64> = sema::Table::new("__sema_engine_counters");
+const COUNTERS: memory::Table<&'static str, u64> = memory::Table::new("__memory_engine_counters");
 /// Row counts for the commit log and the versioned commit log,
 /// maintained in `COUNTERS` at the same write transaction as each row
 /// insert. They let `LogCounts`-based comparisons run O(1) instead of
@@ -49,11 +50,11 @@ const VERSIONED_LOG_COUNT_KEY: &str = "versioned_log_count";
 /// point. Minted per call over the borrowed storage, like
 /// [`crate::StorageReader`].
 pub(crate) struct CommitLog<'engine> {
-    storage: &'engine sema::Sema,
+    storage: &'engine memory::Memory,
 }
 
 impl<'engine> CommitLog<'engine> {
-    pub(crate) fn new(storage: &'engine sema::Sema) -> Self {
+    pub(crate) fn new(storage: &'engine memory::Memory) -> Self {
         Self { storage }
     }
 
@@ -167,7 +168,7 @@ impl<'engine> CommitLog<'engine> {
         transaction: &WriteTransaction,
         entry: &CommitLogEntry,
         commit_count: u64,
-    ) -> sema::Result<()> {
+    ) -> memory::Result<()> {
         COMMIT_LOG.insert(transaction, entry.commit_sequence().value(), entry)?;
         COUNTERS.insert(transaction, COMMIT_LOG_COUNT_KEY, &commit_count)
     }
@@ -184,7 +185,7 @@ impl<'engine> CommitLog<'engine> {
         transaction: &WriteTransaction,
         entry: &VersionedCommitLogEntry,
         versioned_count: u64,
-    ) -> sema::Result<()> {
+    ) -> memory::Result<()> {
         VERSIONED_COMMIT_LOG.insert(transaction, entry.commit_sequence().value(), entry)?;
         CHAIN_HEAD.insert(transaction, LATEST_ENTRY_DIGEST_KEY, &entry.entry_digest())?;
         COUNTERS.insert(transaction, VERSIONED_LOG_COUNT_KEY, &versioned_count)
@@ -218,7 +219,7 @@ impl<'engine> CommitLog<'engine> {
         commit_keys: &[u64],
         versioned_keys: &[u64],
         remaining: LogCounts,
-    ) -> sema::Result<()> {
+    ) -> memory::Result<()> {
         for sequence in commit_keys {
             COMMIT_LOG.remove(transaction, *sequence)?;
         }
@@ -242,7 +243,7 @@ impl<'engine> CommitLog<'engine> {
     /// only the derived slots and needs no family directory — the head
     /// and the counts derive from the raw log alone, before any
     /// component family-to-table registration.
-    pub(crate) fn refolded_derived_slots(storage: &sema::Sema) -> Result<DerivedSlots> {
+    pub(crate) fn refolded_derived_slots(storage: &memory::Memory) -> Result<DerivedSlots> {
         let entries: Vec<VersionedCommitLogEntry> = storage
             .read(|transaction| VERSIONED_COMMIT_LOG.iter(transaction))?
             .into_iter()
@@ -265,7 +266,7 @@ impl<'engine> CommitLog<'engine> {
     /// Whether the versioned log holds any entry — the open-time test
     /// for whether an older-layout store opted into versioning and so
     /// can refold its derived slots from the log alone.
-    pub(crate) fn versioned_log_present(storage: &sema::Sema) -> Result<bool> {
+    pub(crate) fn versioned_log_present(storage: &memory::Memory) -> Result<bool> {
         Ok(storage.read(|transaction| Ok(!VERSIONED_COMMIT_LOG.iter(transaction)?.is_empty()))?)
     }
 
@@ -331,10 +332,10 @@ pub(crate) struct DerivedSlots {
 impl DerivedSlots {
     pub(crate) fn write(
         &self,
-        transaction: &sema::WriteTransaction,
+        transaction: &memory::WriteTransaction,
         layout_key: &'static str,
         layout: u64,
-    ) -> sema::Result<()> {
+    ) -> memory::Result<()> {
         match &self.head {
             Some(digest) => {
                 CHAIN_HEAD.insert(transaction, LATEST_ENTRY_DIGEST_KEY, digest)?;

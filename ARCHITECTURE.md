@@ -1,11 +1,11 @@
-# sema-engine Architecture
+# memory-engine Architecture
 
-`sema-engine` is the workspace's full typed database engine library. It
-sits between the `sema` storage kernel and state-bearing component
+`memory-engine` is the workspace's full typed database engine library. It
+sits between the `memory` storage kernel and state-bearing component
 daemons.
 
-`sema` opens redb files, validates format/schema, and reads/writes typed
-rkyv tables behind the component-facing `.sema` file type. `sema-engine`
+`memory` opens redb files, validates format/schema, and reads/writes typed
+rkyv tables behind the component-facing `.memory` file type. `memory-engine`
 executes `signal-sema` database operations over registered record
 families. Component daemons own actors, sockets, authorization, domain
 validation, and their own databases through `Engine`, not through raw
@@ -16,14 +16,14 @@ redb calls.
 The durable direction below is psyche-stated; the constraints and
 sections that follow realize it.
 
-- `sema-engine` is the exclusive database-operation boundary for
+- `memory-engine` is the exclusive database-operation boundary for
   state-bearing components: no component daemon makes direct redb calls,
   defines redb tables, runs redb transactions, or maintains its own
-  database commit ledger. Per Spirit fosp (Correction): Sema-engine is
+  database commit ledger. Per Spirit fosp (Correction): Memory-engine is
   the exclusive interface to the database; no component daemon may make
   direct redb calls.
 - The versioned operation log is the authoritative source of truth for
-  component Sema state, and the redb store is a rebuildable materialized
+  component Memory state, and the redb store is a rebuildable materialized
   view folded from the log. Per Spirit iir4 (Decision). Durable writes
   go through logged choke points; components receive a read-only
   `StorageReader` with no write affordance, so the log stays complete by
@@ -61,7 +61,7 @@ sections that follow realize it.
   admission half of the versioning library; `VersioningPolicy` names
   the store and schema identity. The admission interface is accepted
   direction; the concrete trait is not yet built.)
-- Splitting SEMA out of the daemon into its own process is a
+- Splitting MEMORY out of the daemon into its own process is a
   distant-future consideration that applies only if a component's
   database must become much larger and independently available. It is
   not the current design — the engine is a per-plane library linked
@@ -70,22 +70,22 @@ sections that follow realize it.
 
 ## Constraints
 
-- `sema-engine` is a Rust library crate.
-- `sema-engine` does not ship a daemon binary.
-- `sema-engine` does not depend on Kameo.
-- `sema-engine` does not depend on tokio.
-- `sema-engine` does not depend on NOTA.
-- `sema-engine` does not depend on `signal-persona-*` contract crates.
-- `Engine` owns a `sema::Sema` handle.
-- `Engine` opens storage through `Sema::open_with_schema`.
+- `memory-engine` is a Rust library crate.
+- `memory-engine` does not ship a daemon binary.
+- `memory-engine` does not depend on Kameo.
+- `memory-engine` does not depend on tokio.
+- `memory-engine` does not depend on NOTA.
+- `memory-engine` does not depend on `signal-persona-*` contract crates.
+- `Engine` owns a `memory::Memory` handle.
+- `Engine` opens storage through `Memory::open_with_schema`.
 - `Engine` is a single-owner handle. Snapshot allocation and prevalidation
   read transactions sit outside the write transaction, so concurrent
   callers on the same `Engine` can race the commit log. Component daemons
   must own each `Engine` from one actor and serialise all engine calls
   through that actor.
 - Consumers that still have unmigrated component-local tables use
-  `Engine::storage_reader()` rather than opening a second `sema::Sema`
-  handle to the same `.sema` file. The handoff is read-only:
+  `Engine::storage_reader()` rather than opening a second `memory::Memory`
+  handle to the same `.memory` file. The handoff is read-only:
   `StorageReader` has no write affordance, so no durable write can
   bypass the commit log. Component crates do not depend on `redb`
   directly just to name the read-transaction type
@@ -128,8 +128,8 @@ sections that follow realize it.
   twice refuses the open with the store left unstamped; a stored
   predecessor definition the declaration names is left for
   `MemoryUpgrades::upgrade_table` to upgrade. `OpenFault` interrupts the transaction for crash witnesses.
-  The storage kernel's own header and schema-version stamp (`__sema_meta`,
-  written by `sema::Sema::open_with_schema`) is a separate, earlier
+  The storage kernel's own header and schema-version stamp (`__memory_meta`,
+  written by `memory::Memory::open_with_schema`) is a separate, earlier
   kernel transaction.
 - `Engine` registers record families before executing database operations.
 - Registration declares typed family identity: every `TableDescriptor` /
@@ -173,7 +173,7 @@ sections that follow realize it.
   so the freed pages — the record's bytes — are reclaimed and overwritten by
   later commits, and a retracted record becomes unrecoverable from the file.
   Callers that might need a removed record back must capture it before
-  retracting. See `sema` ARCHITECTURE §"Deletion durability".
+  retracting. See `memory` ARCHITECTURE §"Deletion durability".
 - `Engine::commit` takes the engine-native `CommitRequest<RecordValue>`
   whose non-empty `Vec<WriteOperation<RecordValue>>` is the atomic unit
   for one registered table. Atomicity is **structural** — the commit's
@@ -193,18 +193,18 @@ sections that follow realize it.
   family without mutating storage.
 - `ReadPlan` owns query-algebra vocabulary for `Match`, `Subscribe`, and
   `Validate` engine operations.
-- `Constrain`, `Project`, `Aggregate`, `Infer`, and `Recurse` are sema-engine
+- `Constrain`, `Project`, `Aggregate`, `Infer`, and `Recurse` are memory-engine
   read-plan operators, not public contract roots.
 - The `signal_sema::SemaOperation` set is closed at six operations:
   `Assert`, `Mutate`, `Retract`, `Match`, `Subscribe`, and `Validate`.
   `Atomic` is not an operation; multi-operation atomicity is structural.
 - Schema/catalog operations are catalog data under the six operations, not a
   separate `Structure` operation.
-- The Sema classification vocabulary stays internal to engine execution
+- The Memory classification vocabulary stays internal to engine execution
   and observation, off the public contract wire. The six words (`Assert`,
   `Mutate`, `Retract`, `Match`, `Subscribe`, `Validate`) are how the
   engine classifies an operation internally; a component's public
-  contract roots are domain verbs, and the daemon derives the Sema class
+  contract roots are domain verbs, and the daemon derives the Memory class
   from the dispatched request. These words must not appear as
   request-root tags, as an `AuthorizedSignalVerb` enum, or as a
   payloadless `SemaObservation` event in any signal or meta-signal
@@ -234,7 +234,7 @@ sections that follow realize it.
   `EngineOpen` path does not emit payload-bearing version entries.
 - `VersioningPolicy` persists one finite retention budget and one recovery topology on first open. The default is a conservative 4,096 raw entries; components choose a typed finite override. A local-checkpoint topology creates no mirror outbox rows, and refuses compaction over unshipped outbox rows only when a durable mirror head was recorded — evidence of a real replay consumer. Outbox rows present with no head ever recorded are vestige of pre-topology engine generations that wrote the outbox unconditionally; local-checkpoint compaction trims them with the covered history rather than blocking on them (v0.11.1). A mirror topology writes every outbox row transactionally and rejects local-checkpoint compaction; it compacts only through a durable server acknowledgement. Later opens reject a policy that differs from the persisted topology or budget.
 - Multi-table derived-history retraction uses the engine-owned compaction boundary: it persists the complete typed staged plan before any row changes, atomically applies all planned rows and their version/outbox effects, then survives restart through verified checkpoint publication and configured history-floor advancement. Components register their family directory and resolve a pending intent during open before serving.
-- The versioned log is stored in the same `.sema` file as table state.
+- The versioned log is stored in the same `.memory` file as table state.
   A successful write inserts the table mutation, the metadata
   `CommitLogEntry`, and the payload-bearing `VersionedCommitLogEntry` in
   one storage-kernel write transaction.
@@ -256,7 +256,7 @@ sections that follow realize it.
   range reads over commit sequence, not whole-log materialization followed
   by an in-memory filter; checkpoint, rebuild, and mirror outbox tails use
   the same range-read shape. Network transport, remote acknowledgement
-  policy, and server-side retention are not part of `sema-engine`.
+  policy, and server-side retention are not part of `memory-engine`.
 - `Engine::replay_versioned(VersionedReplay)` folds versioned log
   entries into a registered family, dispatching each operation on
   family identity. A table renamed between log and replay (same family,
@@ -310,35 +310,35 @@ sections that follow realize it.
 ```mermaid
 flowchart TD
     signal_sema["signal-sema<br/>SemaOperation"]
-    sema["sema<br/>storage kernel"]
-    engine["sema-engine<br/>database operation execution"]
+    memory["memory<br/>storage kernel"]
+    engine["memory-engine<br/>database operation execution"]
     component["component daemon<br/>Kameo actor tree"]
-    database["component.sema"]
+    database["component.memory"]
 
-    engine --> sema
+    engine --> memory
     engine --> signal_sema
     component --> engine
-    sema --> database
+    memory --> database
 ```
 
-`sema-engine` deliberately knows nothing about Persona routing,
+`memory-engine` deliberately knows nothing about Persona routing,
 terminal delivery, auth sockets, or human text. Those are component
 responsibilities.
 
-## Sema short header — symmetric with the wire side
+## Memory short header — symmetric with the wire side
 
 Short headers are universal across both surfaces: the wire (signal)
-and the engine (sema). Just as the signal side carries an 8-enum
-64-bit short header per message, every sema-engine operation —
+and the engine (memory). Just as the signal side carries an 8-enum
+64-bit short header per message, every memory-engine operation —
 executor dispatch, read-plan lowering, command dispatch, and database
 reads/writes — carries the same 8-enum 64-bit short-header structure,
-with a sema-specific root and sub-enum vocabulary rather than the
-signal verbs. The two headers (signal-header and sema-header) use the
+with a memory-specific root and sub-enum vocabulary rather than the
+signal verbs. The two headers (signal-header and memory-header) use the
 same macro machinery but route to different paths. Tap-anywhere
-observability therefore extends to sema-side operations identically to
+observability therefore extends to memory-side operations identically to
 the signal side: a tap can read the header at any engine operation
 without decoding the payload. Per Spirit duis. (Accepted direction;
-the sema-header type is not yet emitted.)
+the memory-header type is not yet emitted.)
 
 ## Current Surface
 
@@ -431,7 +431,7 @@ nodes for future constrain/project/aggregate/infer/recurse execution,
 typed rkyv values, commit-log cursor, bounded log replay, optional
 payload-bearing version replay, table introspection, best-effort
 post-commit subscription delivery for write operations, and durable
-storage through `sema`.
+storage through `memory`.
 
 For ethos contracts that need engine-assigned numeric record identity, a
 component registers an identified family instead of deriving identity from
@@ -470,7 +470,7 @@ branches:
 - `ChangeOutcome::Changed(ChangeReceipt)` — the durable receipt: the
   caller-chosen `ChangeIdentifier`, the effect (created or replaced),
   the key, commit sequence and snapshot. The receipt lands under its
-  change identity in `__sema_engine_change_receipts` in the same write
+  change identity in `__memory_engine_change_receipts` in the same write
   transaction as the row, the log entries and the counters, so a
   receipt exists exactly when the change is durable.
   `MemoryChanges::change_receipt(identity)` resolves an uncertain
@@ -529,7 +529,7 @@ upgrades eagerly, whole family, at registration time:
 - **Not yet**: identified families have no upgrade surface; lazy
   per-record conversion is not offered; a family registered later
   through `register_table` alone lands in its own transaction. The
-  storage-kernel schema-version stamp (`__sema_meta`) is a separate,
+  storage-kernel schema-version stamp (`__memory_meta`) is a separate,
   kernel-owned concern.
 
 ## Checkpoint — payload-bearing derived artifact
@@ -719,14 +719,14 @@ durable, monotonic, and per-database.
 `signal-version-handover`'s `Mirror` operation carries an unspecified
 raw payload (raw bytes plus a `RecordKind` discriminant). When a
 component daemon receives a mirrored write during the handover window
-those raw bytes do **not** enter the sema-engine-managed typed tables
+those raw bytes do **not** enter the memory-engine-managed typed tables
 directly. The receiver persists them in a **separate raw-payload
 container** outside the typed database — the engine's typed tables
 only ever accept records produced by `version-projection`'s
 reverse-projection step.
 
 This keeps the typed database invariant intact: every record in
-sema-engine's tables has gone through a typed shape known to the
+memory-engine's tables has gone through a typed shape known to the
 receiver's signal-X library. Un-incorporated handover bytes live
 beside the typed database, never inside it. Non-representable
 payloads become typed `Divergence` operations on the handover wire,
@@ -757,18 +757,18 @@ production handover.
 
 **Status:** integrated into the brilliant macro library pattern per `reports/designer/326-v13-spirit-complete-schema-vision.md §3` (schemas as macro-pattern instance).
 
-**Role:** this crate is the typed database engine. It owns the `Engine` handle, the typed-table machinery, the `CommitSequence` high-water-mark contract, and the redb storage adapter. Per-component daemons consume this crate by declaring their storage types in a dedicated per-component schema document — the `sema.schema` document kind (existing usage: `orchestrate/schema/sema.schema`, `spirit/schema/sema.schema`, each generated into `src/schema/sema.rs`) — from which the macro emits the redb table descriptors that bind those storage types into `Engine`.
+**Role:** this crate is the typed database engine. It owns the `Engine` handle, the typed-table machinery, the `CommitSequence` high-water-mark contract, and the redb storage adapter. Per-component daemons consume this crate by declaring their storage types in a dedicated per-component schema document — the `memory.schema` document kind (existing usage: `orchestrate/schema/memory.schema`, `spirit/schema/memory.schema`, each generated into `src/schema/memory.rs`) — from which the macro emits the redb table descriptors that bind those storage types into `Engine`.
 
-**Integration target:** typed database engine; the macro emits sema-engine
+**Integration target:** typed database engine; the macro emits memory-engine
 table descriptors from the storage-type declarations in a component's
-`sema.schema` document. Each declaration names one stored record type together
+`memory.schema` document. Each declaration names one stored record type together
 with the parts this engine consumes from it — its record type, its key or
 identity style, and its indices and projections. The macro lowers these into
 `TableDescriptor` or `IdentifiedTableDescriptor` constants the component daemon
 registers with its `Engine` at startup. Every descriptor is generated from a
 declaration: no daemon hand-constructs a descriptor.
 
-The `sema.schema` document kind is the settled declaration surface; the
+The `memory.schema` document kind is the settled declaration surface; the
 schema-language architecture records it as a distinct document kind whose file
 kind fixes the storage-declaration root type (see that repository's "Schema
 document kinds"). It supersedes two earlier framings of the same vision: the
@@ -783,7 +783,7 @@ consumes from a declaration without depending on their surface form.
 generated-descriptor chain used as its stored-record identity basis has been
 retired from schema-language along with the families construct. The successor
 identity basis for stored records is not yet chosen; it is pending the same
-`sema.schema` document-kind design session. Schema-language's per-declaration
+`memory.schema` document-kind design session. Schema-language's per-declaration
 nominal-identifier and core-hash machinery is the available foundation and the
 candidate basis, but the binding — how a stored record's identity derives from
 it — is undesigned here and reserved for that session. That is the target; as
@@ -796,7 +796,7 @@ production migration hand-construct their `TableDefinition` declarations. The
 macro-pattern upgrade — named `schema-engine` here before that repo was
 renamed `ethos-engine` on 2026-07-27 (S1R entry 7) — replaces those
 hand-written declarations with macro-emitted descriptors derived from the
-component's `sema.schema` document, and the surviving hand-written paths are
+component's `memory.schema` document, and the surviving hand-written paths are
 drift to be eliminated as each component converts.
 
 **References:**

@@ -514,9 +514,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "sema"
+name = "memory"
 version = "0.1.1"
-source = "git+https://github.com/LiGoldragon/sema.git?rev=51d7927c872f0df12791bad8d39a4db6433b01a1#51d7927c872f0df12791bad8d39a4db6433b01a1"
+source = "git+https://github.com/LiGoldragon/memory.git?rev=69d91c486b335575ee5e4b0eb79da27094e700b6#69d91c486b335575ee5e4b0eb79da27094e700b6"
 dependencies = [
  "redb",
  "rkyv",
@@ -524,7 +524,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "sema-engine"
+name = "memory-engine"
 version = "0.18.0"
 dependencies = [
  "blake3",
@@ -534,7 +534,7 @@ dependencies = [
  "rkyv",
  "rust-logos",
  "schema-rust",
- "sema",
+ "memory",
  "sema-translator",
  "signal-sema",
  "signal-sema-translator",

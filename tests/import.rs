@@ -7,14 +7,14 @@
 
 use std::path::PathBuf;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Assertion, Checkpoint, Engine, EngineOpen, EngineRecord, FamilyDirectory, FamilyName,
     IdentifiedAssertion, IdentifiedQueryPlan, IdentifiedRetraction, IdentifiedTableDescriptor,
     IdentifiedTableReference, Mutation, QueryPlan, RecordKey, Retraction, RowMaterializer,
     SchemaHash, SchemaVersion, TableDescriptor, TableName, TableReference, VersionedCommitLogEntry,
     VersionedStoreName, VersioningPolicy,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -69,11 +69,11 @@ impl Families {
 }
 
 impl FamilyDirectory for Families {
-    fn materialize(&self, row: RowMaterializer<'_>) -> sema_engine::Result<()> {
+    fn materialize(&self, row: RowMaterializer<'_>) -> memory_engine::Result<()> {
         match row.family().family().as_str() {
             "thought" => row.apply(self.thoughts),
             "tally" => row.apply_identified(self.tallies),
-            other => Err(sema_engine::Error::FamilyUnknown {
+            other => Err(memory_engine::Error::FamilyUnknown {
                 family: other.to_owned(),
             }),
         }
@@ -85,8 +85,8 @@ impl FamilyDirectory for Families {
 struct FailingDirectory;
 
 impl FamilyDirectory for FailingDirectory {
-    fn materialize(&self, row: RowMaterializer<'_>) -> sema_engine::Result<()> {
-        Err(sema_engine::Error::FamilyUnknown {
+    fn materialize(&self, row: RowMaterializer<'_>) -> memory_engine::Result<()> {
+        Err(memory_engine::Error::FamilyUnknown {
             family: row.family().family().as_str().to_owned(),
         })
     }
@@ -104,7 +104,7 @@ impl Fixture {
     }
 
     fn database_path(&self, name: &str) -> PathBuf {
-        self.directory.path().join(format!("{name}.sema"))
+        self.directory.path().join(format!("{name}.memory"))
     }
 
     fn open_store(&self, file: &str, store_name: &str) -> Engine {
@@ -296,7 +296,7 @@ fn import_requires_a_fresh_store() {
         .begin_import()
         .map(|_session| ())
         .expect_err("used store cannot import");
-    assert!(matches!(error, sema_engine::Error::ImportStoreNotFresh));
+    assert!(matches!(error, memory_engine::Error::ImportStoreNotFresh));
 }
 
 #[test]
@@ -314,7 +314,7 @@ fn import_rejects_a_checkpoint_for_another_store() {
         .expect_err("foreign checkpoint is rejected");
     assert!(matches!(
         error,
-        sema_engine::Error::ImportStoreNameMismatch { .. }
+        memory_engine::Error::ImportStoreNameMismatch { .. }
     ));
 }
 
@@ -329,7 +329,10 @@ fn import_session_requires_exactly_one_checkpoint() {
         let error = session
             .commit(&Families::new())
             .expect_err("commit without checkpoint is rejected");
-        assert!(matches!(error, sema_engine::Error::ImportMissingCheckpoint));
+        assert!(matches!(
+            error,
+            memory_engine::Error::ImportMissingCheckpoint
+        ));
     }
     {
         let mut session = target.begin_import().expect("import session re-mints");
@@ -341,7 +344,7 @@ fn import_session_requires_exactly_one_checkpoint() {
             .expect_err("second checkpoint is rejected");
         assert!(matches!(
             error,
-            sema_engine::Error::ImportCheckpointAlreadyIngested
+            memory_engine::Error::ImportCheckpointAlreadyIngested
         ));
     }
 }
@@ -361,7 +364,7 @@ fn interrupted_import_rolls_back_and_cleanly_retries() {
         let error = session
             .commit(&FailingDirectory)
             .expect_err("failing directory aborts the import");
-        assert!(matches!(error, sema_engine::Error::FamilyUnknown { .. }));
+        assert!(matches!(error, memory_engine::Error::FamilyUnknown { .. }));
     }
 
     // The aborted transaction left no partial state: the store is

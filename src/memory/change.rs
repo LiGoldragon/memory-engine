@@ -26,8 +26,8 @@ use super::{
 };
 
 /// Every committed change's receipt, keyed by its change identity.
-const CHANGE_RECEIPTS: sema::Table<&'static [u8; 32], ChangeReceipt> =
-    sema::Table::new("__sema_engine_change_receipts");
+const CHANGE_RECEIPTS: memory::Table<&'static [u8; 32], ChangeReceipt> =
+    memory::Table::new("__memory_engine_change_receipts");
 
 /// Committing a record's typed change and resolving it by its identity.
 pub trait MemoryChanges {
@@ -71,7 +71,9 @@ impl MemoryChanges for Engine {
         let key = request.key().clone();
         let stored = self.storage.read(|transaction| {
             let receipt = CHANGE_RECEIPTS.get(transaction, request.identifier().bytes())?;
-            let current = table.sema_table().get(transaction, key.to_owned_string())?;
+            let current = table
+                .memory_table()
+                .get(transaction, key.to_owned_string())?;
             Ok((receipt, current))
         });
         let current = match stored {
@@ -180,7 +182,7 @@ impl Engine {
         let counts = self.log_counts()?;
         self.storage.write(|transaction| {
             table
-                .sema_table()
+                .memory_table()
                 .insert(transaction, key.to_owned_string(), next)?;
             CommitLog::append_commit(transaction, &entry, counts.next_commit())?;
             self.insert_versioned_entry(transaction, &versioned_entry, counts.next_versioned())?;

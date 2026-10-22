@@ -1,12 +1,12 @@
-//! Full typed database engine over the `sema` storage kernel.
+//! Full typed database engine over the `memory` storage kernel.
 //!
-//! `Engine` composes `sema::Sema` and executes Sema database operations
+//! `Engine` composes `memory::Memory` and executes Memory database operations
 //! over registered typed record families. Components own daemons,
 //! actors, sockets, authorization, and domain validation; this crate is
 //! only the reusable engine library.
 //!
 //! The versioned commit log is the authoritative source of truth for
-//! component Sema state; the table store is a rebuildable materialized
+//! component Memory state; the table store is a rebuildable materialized
 //! view folded from it. Every durable write goes through the engine's
 //! logged choke points — the storage kernel hands out read access only.
 
@@ -53,6 +53,10 @@ pub use memory::{
     MemoryVersion, StorageFailure, StoragePhase, UpgradeFault, UpgradeFrom, UpgradeOutcome,
     UpgradeReceipt, UpgradeRefusal,
 };
+pub use memory::{
+    Error as StorageKernelError, ReadTransaction as StorageReadTransaction,
+    Result as StorageKernelResult, SchemaVersion, Table as StorageKernelTable,
+};
 pub use mutation::{
     Assertion, CommitReceipt, CommitRequest, IdentifiedAssertion, IdentifiedMutation,
     IdentifiedMutationReceipt, IdentifiedRetraction, KeyedAssertion, KeyedMutation, Mutation,
@@ -69,10 +73,6 @@ pub use query::{
 };
 pub use record::{
     EngineRecord, EngineStoredRecord, EngineStoredValue, RecordIdentifier, RecordKey, RecordKeyKind,
-};
-pub use sema::{
-    Error as StorageKernelError, ReadTransaction as StorageReadTransaction,
-    Result as StorageKernelResult, SchemaVersion, Table as StorageKernelTable,
 };
 pub use sequence::CommitSequence;
 pub use snapshot::{DatabaseMarker, SnapshotIdentifier};

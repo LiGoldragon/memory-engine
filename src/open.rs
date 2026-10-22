@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use sema::{Schema, SchemaVersion};
+use memory::{Schema, SchemaVersion};
 
 use crate::{
     FamilyIdentity, IdentifiedTableDescriptor, SchemaHash, TableDescriptor, TableName,

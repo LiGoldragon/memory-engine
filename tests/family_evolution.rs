@@ -8,14 +8,14 @@
 use std::convert::Infallible;
 use std::path::PathBuf;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Assertion, Decision, Engine, EngineOpen, EngineRecord, Error, FamilyName, MemoryDefinition,
     MemoryUpgrades, MemoryVersion, QueryPlan, RecordKey, SchemaHash, SchemaVersion, StoragePhase,
     TableDescriptor, TableName, TableReference, UpgradeFrom, UpgradeOutcome,
     VersionedHistoryAcknowledgement, VersionedHistoryRetention, VersionedPayload,
     VersionedStoreName, VersioningPolicy,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_sema::SemaOperation;
 use tempfile::TempDir;
 
@@ -193,7 +193,7 @@ impl Fixture {
     }
 
     fn database_path(&self, name: &str) -> PathBuf {
-        self.directory.path().join(format!("{name}.sema"))
+        self.directory.path().join(format!("{name}.memory"))
     }
 
     fn open_plain(&self, name: &str) -> Engine {

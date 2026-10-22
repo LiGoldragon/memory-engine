@@ -17,16 +17,16 @@
 
 use std::path::{Path, PathBuf};
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Decision, Engine, EngineOpen, FamilyName, Memorable, MemoryDefinition, MemoryVersion,
     SchemaHash, SchemaVersion, TableDescriptor, TableName, TableRegistration, UpgradeFrom,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 pub const NOTES: TableName = TableName::new("notes");
-const CATALOG: sema::Table<&'static str, TableRegistration> =
-    sema::Table::new("__sema_engine_catalog");
+const CATALOG: memory::Table<&'static str, TableRegistration> =
+    memory::Table::new("__memory_engine_catalog");
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 #[rkyv(derive(Debug))]
@@ -158,7 +158,7 @@ impl NoteStore {
     }
 
     pub fn path(&self) -> PathBuf {
-        self.directory.path().join("notes.sema")
+        self.directory.path().join("notes.memory")
     }
 
     pub fn open(&self) -> Engine {
@@ -192,7 +192,7 @@ impl NoteStore {
 
 fn raw<Row>(path: &Path) -> (SchemaHash, Vec<(String, Row)>)
 where
-    Row: sema_engine::EngineStoredValue,
+    Row: memory_engine::EngineStoredValue,
     <Row as Archive>::Archived: rkyv::Deserialize<Row, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'validation> rkyv::bytecheck::CheckBytes<
             rkyv::rancor::Strategy<
@@ -204,9 +204,9 @@ where
             >,
         >,
 {
-    let kernel = sema::Sema::open_with_schema(
+    let kernel = memory::Memory::open_with_schema(
         path,
-        &sema::Schema {
+        &memory::Schema {
             version: SchemaVersion::new(1),
         },
     )
@@ -218,7 +218,7 @@ where
                 .expect("notes are catalogued")
                 .identity()
                 .schema_hash();
-            let rows = sema::Table::<String, Row>::new(NOTES.as_str()).iter(transaction)?;
+            let rows = memory::Table::<String, Row>::new(NOTES.as_str()).iter(transaction)?;
             Ok((marker, rows))
         })
         .expect("raw store reads")

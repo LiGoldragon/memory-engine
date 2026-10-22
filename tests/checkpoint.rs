@@ -6,12 +6,12 @@
 
 use std::path::PathBuf;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Assertion, CommitSequence, Engine, EngineOpen, EngineRecord, FamilyName, Mutation,
     PortableCheckpoint, RecordKey, Retraction, SchemaHash, SchemaVersion, TableDescriptor,
     TableName, VersionedStoreName, VersioningPolicy,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -48,7 +48,7 @@ impl Fixture {
     }
 
     fn database_path(&self, name: &str) -> PathBuf {
-        self.directory.path().join(format!("{name}.sema"))
+        self.directory.path().join(format!("{name}.memory"))
     }
 
     fn open_versioned(&self, name: &str) -> Engine {
@@ -203,10 +203,10 @@ fn portable_checkpoint_rejects_doctored_bytes() {
         .expect_err("doctored checkpoint is rejected");
     assert!(matches!(
         error,
-        sema_engine::Error::CheckpointDecode { .. }
-            | sema_engine::Error::CheckpointDigestMismatch { .. }
-            | sema_engine::Error::SegmentDigestMismatch { .. }
-            | sema_engine::Error::ViewDigestMismatch { .. }
+        memory_engine::Error::CheckpointDecode { .. }
+            | memory_engine::Error::CheckpointDigestMismatch { .. }
+            | memory_engine::Error::SegmentDigestMismatch { .. }
+            | memory_engine::Error::ViewDigestMismatch { .. }
     ));
 }
 
@@ -261,7 +261,7 @@ fn checkpoint_without_new_entries_returns_typed_error() {
     let error = engine.checkpoint().expect_err("empty log is rejected");
     assert!(matches!(
         error,
-        sema_engine::Error::CheckpointNothingToCover
+        memory_engine::Error::CheckpointNothingToCover
     ));
 
     engine
@@ -275,7 +275,7 @@ fn checkpoint_without_new_entries_returns_typed_error() {
         .expect_err("checkpoint without new entries is rejected");
     assert!(matches!(
         error,
-        sema_engine::Error::CheckpointNothingToCover
+        memory_engine::Error::CheckpointNothingToCover
     ));
 }
 
@@ -299,7 +299,7 @@ fn checkpoint_requires_a_versioned_store() {
         .expect_err("unversioned store cannot checkpoint");
     assert!(matches!(
         error,
-        sema_engine::Error::VersioningNotEnabled { .. }
+        memory_engine::Error::VersioningNotEnabled { .. }
     ));
 }
 
@@ -336,7 +336,7 @@ fn history_written_before_versioning_cannot_checkpoint() {
         .expect_err("incomplete versioned log is rejected");
     assert!(matches!(
         error,
-        sema_engine::Error::VersionedLogIncomplete {
+        memory_engine::Error::VersionedLogIncomplete {
             commits: 2,
             versioned: 1
         }

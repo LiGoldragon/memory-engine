@@ -300,7 +300,7 @@ impl CheckpointSegment {
 
     pub fn digest(&self) -> SegmentDigest {
         let mut hasher = blake3::Hasher::new();
-        EntryDigest::update_bytes(&mut hasher, b"sema-engine-checkpoint-segment-v1");
+        EntryDigest::update_bytes(&mut hasher, b"memory-engine-checkpoint-segment-v1");
         hasher.update(&(self.rows.len() as u64).to_le_bytes());
         for row in &self.rows {
             row.update_digest(&mut hasher);
@@ -433,7 +433,7 @@ impl CheckpointMetadata {
 
     fn computed_digest(&self) -> CheckpointDigest {
         let mut hasher = blake3::Hasher::new();
-        EntryDigest::update_bytes(&mut hasher, b"sema-engine-checkpoint-v1");
+        EntryDigest::update_bytes(&mut hasher, b"memory-engine-checkpoint-v1");
         hasher.update(&self.sequence.value().to_le_bytes());
         EntryDigest::update_bytes(&mut hasher, self.store_name.as_str().as_bytes());
         EntryDigest::update_bytes(&mut hasher, self.store_schema_hash.bytes());

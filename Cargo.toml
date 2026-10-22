@@ -1,21 +1,21 @@
 [package]
-name         = "sema-engine"
+name         = "memory-engine"
 version      = "0.18.0"
 edition      = "2024"
 rust-version = "1.89"
 license      = "MIT OR Apache-2.0"
-repository   = "https://github.com/LiGoldragon/sema-engine"
-description  = "Typed database operation engine over sema and signal-sema"
+repository   = "https://github.com/LiGoldragon/memory-engine"
+description  = "Typed database operation engine over memory and signal-sema"
 publish      = false
 
 [lib]
-name = "sema_engine"
+name = "memory_engine"
 path = "src/lib.rs"
 
 [dependencies]
 blake3 = "1"
 rkyv = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
-sema = { git = "https://github.com/LiGoldragon/sema.git", rev = "51d7927c872f0df12791bad8d39a4db6433b01a1" }
+memory = { git = "https://github.com/LiGoldragon/memory.git", rev = "69d91c486b335575ee5e4b0eb79da27094e700b6" }
 signal-sema = { git = "https://github.com/LiGoldragon/signal-sema.git", rev = "4f3a24e6677ab9d200672851016c4c760c1e36e8", default-features = false }
 thiserror = "2"
 

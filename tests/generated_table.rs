@@ -1,30 +1,30 @@
-use sema_engine::{Engine, EngineOpen, SchemaVersion, TableSpecification};
+use memory_engine::{Engine, EngineOpen, SchemaVersion, TableSpecification};
 
 mod support;
 
 #[allow(non_camel_case_types)]
 mod generated {
-    include!("fixtures/generated_sema_table.rs");
+    include!("fixtures/generated_memory_table.rs");
 }
 
 use generated::{z2VKo1, z2VKo2, z2VKo3};
 
 #[test]
-fn checked_sema_source_and_generated_rust_are_fresh() {
-    let generated = support::generated_sema_table();
+fn checked_memory_source_and_generated_rust_are_fresh() {
+    let generated = support::generated_memory_table();
     generated
         .write_or_check(support::UPDATE_VARIABLE)
-        .expect("checked Sema and Rust projections are fresh");
+        .expect("checked Memory and Rust projections are fresh");
     let table_identity = support::generated_identity(102);
     assert_eq!(z2VKo3::TABLE_NAME.as_str(), table_identity.as_str());
 }
 
 #[test]
 fn generated_domain_snapshot_table_writes_and_reads_a_typed_domain_key() {
-    let temporary = tempfile::tempdir().expect("fresh Sema directory");
-    let path = temporary.path().join("generated-table.sema");
+    let temporary = tempfile::tempdir().expect("fresh Memory directory");
+    let path = temporary.path().join("generated-table.memory");
     let mut engine = Engine::open(EngineOpen::new(&path, SchemaVersion::new(1)))
-        .expect("fresh redb-backed Sema opens");
+        .expect("fresh redb-backed Memory opens");
     engine
         .register_table(z2VKo3::descriptor())
         .expect("generated table registers");
@@ -43,16 +43,16 @@ fn generated_domain_snapshot_table_writes_and_reads_a_typed_domain_key() {
     };
     engine
         .assert_keyed(z2VKo3::assertion(&domain, domain_snapshot.clone()).expect("typed assertion"))
-        .expect("record commits through sema-engine");
+        .expect("record commits through memory-engine");
     let snapshot = engine
         .match_records(z2VKo3::query(&domain).expect("typed key query"))
-        .expect("record reads through sema-engine");
+        .expect("record reads through memory-engine");
 
     assert_eq!(snapshot.records(), std::slice::from_ref(&domain_snapshot));
     drop(engine);
 
     let mut reopened = Engine::open(EngineOpen::new(&path, SchemaVersion::new(1)))
-        .expect("redb-backed Sema reopens");
+        .expect("redb-backed Memory reopens");
     reopened
         .register_table(z2VKo3::descriptor())
         .expect("generated table re-registers");

@@ -6,13 +6,13 @@
 
 use std::path::PathBuf;
 
-use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use sema_engine::{
+use memory_engine::{
     Assertion, Engine, EngineOpen, EngineRecord, FamilyDirectory, FamilyName, IdentifiedAssertion,
     IdentifiedQueryPlan, IdentifiedTableDescriptor, IdentifiedTableReference, Mutation, QueryPlan,
     RecordKey, Retraction, RowMaterializer, SchemaHash, SchemaVersion, TableDescriptor, TableName,
     TableReference, VersionedStoreName, VersioningPolicy,
 };
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use tempfile::TempDir;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -64,11 +64,11 @@ impl Families {
 }
 
 impl FamilyDirectory for Families {
-    fn materialize(&self, row: RowMaterializer<'_>) -> sema_engine::Result<()> {
+    fn materialize(&self, row: RowMaterializer<'_>) -> memory_engine::Result<()> {
         match row.family().family().as_str() {
             "thought" => row.apply(self.thoughts),
             "tally" => row.apply_identified(self.tallies),
-            other => Err(sema_engine::Error::FamilyUnknown {
+            other => Err(memory_engine::Error::FamilyUnknown {
                 family: other.to_owned(),
             }),
         }
@@ -87,7 +87,7 @@ impl Fixture {
     }
 
     fn database_path(&self, name: &str) -> PathBuf {
-        self.directory.path().join(format!("{name}.sema"))
+        self.directory.path().join(format!("{name}.memory"))
     }
 
     fn open_versioned(&self, name: &str) -> Engine {
@@ -199,11 +199,11 @@ fn rebuild_clears_a_stale_row_the_log_retracted() {
     // the retracted row through the raw storage kernel. (No engine path
     // can do this — StorageReader is read-only.)
     {
-        const THOUGHTS: sema::Table<String, Thought> = sema::Table::new("thoughts");
-        let schema = sema::Schema {
+        const THOUGHTS: memory::Table<String, Thought> = memory::Table::new("thoughts");
+        let schema = memory::Schema {
             version: SchemaVersion::new(1),
         };
-        let storage = sema::Sema::open_with_schema(&path, &schema).expect("kernel opens");
+        let storage = memory::Memory::open_with_schema(&path, &schema).expect("kernel opens");
         storage
             .write(|transaction| {
                 THOUGHTS.insert(
@@ -289,6 +289,6 @@ fn rebuild_requires_a_versioned_store() {
         .expect_err("unversioned store cannot rebuild");
     assert!(matches!(
         error,
-        sema_engine::Error::VersioningNotEnabled { .. }
+        memory_engine::Error::VersioningNotEnabled { .. }
     ));
 }

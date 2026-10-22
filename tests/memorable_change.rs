@@ -6,11 +6,11 @@
 
 mod note_family;
 
-use note_family::{Note, NoteChange, NoteRefusal, NoteStore};
-use sema_engine::{
+use memory_engine::{
     ChangeEffect, ChangeIdentifier, ChangeOutcome, MemoryChange, MemoryChanges, QueryPlan,
     RecordKey, StoragePhase, TableReference,
 };
+use note_family::{Note, NoteChange, NoteRefusal, NoteStore};
 
 fn write(id: &str, title: &str, body: &str) -> NoteChange {
     NoteChange::Write {
