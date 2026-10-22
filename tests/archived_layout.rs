@@ -2,10 +2,8 @@
 //!
 //! `CommitLogEntry` and `VersionedCommitLogEntry` are `rkyv::Archive`
 //! types written to durable storage, and both carry their operations
-//! in a `NonEmpty`. The golden byte strings below were captured from a
-//! build that still took `NonEmpty` from `signal-frame`; they pin the
-//! archived layout across the move of that type into this crate, so a
-//! store written by an earlier build stays readable.
+//! in a `NonEmpty`. Golden byte strings pin the Memory archived
+//! representation, including its namespace-bound schema and entry digests.
 
 use memory_engine::{
     Catalog, CommitLogEntry, CommitLogOperation, CommitSequence, EntryDigest, FamilyIdentity,
@@ -15,9 +13,9 @@ use memory_engine::{
 use signal_sema::SemaOperation;
 
 const COMMIT_LOG_ENTRY_ARCHIVE: &str = "0174686f7567687473010062657461ffffffff0374686f75676874730000000000000000000007000000000000000b000000000000000074686f75676874730100616c706861ffffffb7ffffff02000000";
-const VERSIONED_COMMIT_LOG_ENTRY_ARCHIVE: &str = "7769746e6573732d73746f7265010203040254686f75676874ff030303030303030303030303030303030303030303030303030303030303030374686f7567687473010062657461ffffffff0100000000000000008d000000abffffff1e15b6a433f4dcd3d00c9a9ed9edca2d413067d9386d5a2f325d574c46b627ce07000000000000000b0000000000000001050505050505050505050505050505050505050505050505050505050505050514cc522845067a875544c311181e7fe7990abcc41d4f161af252093005c299dc0054686f75676874ff030303030303030303030303030303030303030303030303030303030303030374686f75676874730100616c706861ffffff0003ffffff04000000fffeffff01000000";
+const VERSIONED_COMMIT_LOG_ENTRY_ARCHIVE: &str = "7769746e6573732d73746f7265010203040254686f75676874ff030303030303030303030303030303030303030303030303030303030303030374686f7567687473010062657461ffffffff0100000000000000008d000000abffffff2f7a9db3184997e5cfa357a1d76adc12bcb24b199e55ad3b2c70cf9a1fac4dcd07000000000000000b000000000000000105050505050505050505050505050505050505050505050505050505050505051d3ae3109e73933fbd3baa124fe169877f5b0aafd87f8472c95ee8fbecd49fab0054686f75676874ff030303030303030303030303030303030303030303030303030303030303030374686f75676874730100616c706861ffffff0003ffffff04000000fffeffff01000000";
 const VERSIONED_ENTRY_DIGEST: &str =
-    "14cc522845067a875544c311181e7fe7990abcc41d4f161af252093005c299dc";
+    "1d3ae3109e73933fbd3baa124fe169877f5b0aafd87f8472c95ee8fbecd49fab";
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -88,4 +86,13 @@ fn archived_versioned_commit_log_entry_bytes_are_unchanged() {
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&entry)
         .expect("versioned commit log entry serializes");
     assert_eq!(hex(&bytes), VERSIONED_COMMIT_LOG_ENTRY_ARCHIVE);
+}
+
+#[test]
+fn empty_catalog_schema_hash_uses_memory_namespace() {
+    let hash = StoreSchemaHash::from(&Catalog::new(Vec::new()));
+    assert_eq!(
+        hex(hash.bytes()),
+        "2f7a9db3184997e5cfa357a1d76adc12bcb24b199e55ad3b2c70cf9a1fac4dcd"
+    );
 }
