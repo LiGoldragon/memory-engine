@@ -274,6 +274,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
+name = "memory"
+version = "0.1.1"
+source = "git+https://github.com/LiGoldragon/memory.git?rev=69d91c486b335575ee5e4b0eb79da27094e700b6#69d91c486b335575ee5e4b0eb79da27094e700b6"
+dependencies = [
+ "redb",
+ "rkyv",
+ "thiserror",
+]
+
+[[package]]
+name = "memory-engine"
+version = "0.18.0"
+dependencies = [
+ "blake3",
+ "core-ethos",
+ "core-nomos",
+ "memory",
+ "name-table 0.3.0",
+ "rkyv",
+ "rust-logos",
+ "schema-rust",
+ "sema-translator",
+ "signal-sema",
+ "signal-sema-translator",
+ "structural-codec",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "munge"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -510,36 +540,6 @@ dependencies = [
  "core-nomos",
  "rust-logos",
  "sema-translator",
- "thiserror",
-]
-
-[[package]]
-name = "memory"
-version = "0.1.1"
-source = "git+https://github.com/LiGoldragon/memory.git?rev=69d91c486b335575ee5e4b0eb79da27094e700b6#69d91c486b335575ee5e4b0eb79da27094e700b6"
-dependencies = [
- "redb",
- "rkyv",
- "thiserror",
-]
-
-[[package]]
-name = "memory-engine"
-version = "0.18.0"
-dependencies = [
- "blake3",
- "core-ethos",
- "core-nomos",
- "name-table 0.3.0",
- "rkyv",
- "rust-logos",
- "schema-rust",
- "memory",
- "sema-translator",
- "signal-sema",
- "signal-sema-translator",
- "structural-codec",
- "tempfile",
  "thiserror",
 ]
 
