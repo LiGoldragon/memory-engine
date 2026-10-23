@@ -7,7 +7,7 @@ use memory_engine::{
     VersionedPayload, VersionedStoreName, VersioningPolicy,
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, rancor};
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 use tempfile::TempDir;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -152,7 +152,7 @@ fn assert_writes_commit_log_entry_with_committed_snapshot() {
     assert_eq!(log[0].commit_sequence(), CommitSequence::new(1));
     assert_eq!(log[0].snapshot(), SnapshotIdentifier::new(1));
     let head = log[0].operations().head();
-    assert_eq!(head.operation(), SemaOperation::Assert);
+    assert_eq!(head.operation(), MemoryOperation::Assert);
     assert_eq!(head.table_name(), "logged_records");
     assert_eq!(
         head.key().map(RecordKey::to_owned_string).as_deref(),
@@ -196,13 +196,13 @@ fn commit_log_and_snapshot_cursor_survive_reopen() {
     assert_eq!(log[0].snapshot(), SnapshotIdentifier::new(1));
     assert_eq!(
         log[0].operations().head().operation(),
-        SemaOperation::Assert
+        MemoryOperation::Assert
     );
     assert_eq!(log[1].commit_sequence(), CommitSequence::new(2));
     assert_eq!(log[1].snapshot(), SnapshotIdentifier::new(2));
     assert_eq!(
         log[1].operations().head().operation(),
-        SemaOperation::Assert
+        MemoryOperation::Assert
     );
     assert_eq!(
         reopened.latest_snapshot().unwrap(),
@@ -267,7 +267,7 @@ fn versioned_commit_log_carries_payloads_and_digest_chain() {
     assert_ne!(log[0].entry_digest(), log[1].entry_digest());
 
     let first_operation = log[0].operations().head();
-    assert_eq!(first_operation.operation(), SemaOperation::Assert);
+    assert_eq!(first_operation.operation(), MemoryOperation::Assert);
     assert_eq!(first_operation.table_name(), "logged_records");
     assert_eq!(
         first_operation
@@ -282,7 +282,7 @@ fn versioned_commit_log_carries_payloads_and_digest_chain() {
     );
 
     let second_operation = log[1].operations().head();
-    assert_eq!(second_operation.operation(), SemaOperation::Retract);
+    assert_eq!(second_operation.operation(), MemoryOperation::Retract);
     assert_eq!(
         second_operation
             .key()

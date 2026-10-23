@@ -13,7 +13,7 @@ use rkyv::validation::Validator;
 use rkyv::validation::archive::ArchiveValidator;
 use rkyv::validation::shared::SharedValidator;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 
 use crate::{
     EngineStoredValue, EntryDigest, Error, FamilyIdentity, FamilyName, IdentifiedTableReference,
@@ -24,7 +24,7 @@ use crate::{
 /// Full 32-byte blake3 digest of the canonical sorted view: row count,
 /// then every (family name, schema hash, key, payload) in view order.
 /// The table coordinate is deliberately excluded — the view is
-/// semantic, and a rename keeps the view digest stable, matching
+/// memoryntic, and a rename keeps the view digest stable, matching
 /// [`crate::StoreSchemaHash`] discipline.
 #[derive(
     Archive,
@@ -99,7 +99,7 @@ impl ViewRow {
     }
 }
 
-/// The semantic coordinate of one view row: family name, per-family
+/// The memoryntic coordinate of one view row: family name, per-family
 /// schema hash, record key. Orders the canonical view; deliberately
 /// excludes the table coordinate.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -237,7 +237,7 @@ impl CanonicalView {
         let key = ViewKey::new(operation.family(), &record_key);
         self.touched.insert(key.clone());
         match operation.operation() {
-            SemaOperation::Assert | SemaOperation::Mutate => {
+            MemoryOperation::Assert | MemoryOperation::Mutate => {
                 let Some(bytes) = operation.payload().bytes() else {
                     return Err(Error::ReplayTombstonePayload {
                         table: operation.family().table_name().to_owned(),
@@ -245,7 +245,7 @@ impl CanonicalView {
                 };
                 self.rows.insert(key, bytes.to_vec());
             }
-            SemaOperation::Retract => {
+            MemoryOperation::Retract => {
                 self.rows.remove(&key);
             }
             other => {
@@ -271,7 +271,7 @@ impl CanonicalView {
     }
 
     /// Project the view into materializable rows, resolving each
-    /// semantic key against the supplied inventory of family
+    /// memoryntic key against the supplied inventory of family
     /// identities for its current table coordinate. Final rows carry
     /// record payloads; keys the fold touched but did not keep become
     /// tombstone rows that clear stale materialized state.

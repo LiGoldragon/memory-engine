@@ -9,7 +9,7 @@ use memory_engine::{
     TableName, UnificationPlan,
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 use tempfile::TempDir;
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -110,7 +110,7 @@ fn engine_executes_assert_and_match_over_registered_record_family() {
         ))
         .expect("assert succeeds");
 
-    assert_eq!(receipt.operation(), SemaOperation::Assert);
+    assert_eq!(receipt.operation(), MemoryOperation::Assert);
     assert_eq!(receipt.table().as_str(), "toy_records");
     assert_eq!(receipt.commit_sequence(), CommitSequence::new(1));
     assert_eq!(receipt.snapshot(), SnapshotIdentifier::new(1));
@@ -121,7 +121,7 @@ fn engine_executes_assert_and_match_over_registered_record_family() {
         .match_records(QueryPlan::all(records))
         .expect("match succeeds");
 
-    assert_eq!(snapshot.operation(), SemaOperation::Match);
+    assert_eq!(snapshot.operation(), MemoryOperation::Match);
     assert_eq!(snapshot.snapshot(), SnapshotIdentifier::new(1));
     assert_eq!(
         snapshot.records(),
@@ -148,7 +148,7 @@ fn engine_accepts_explicit_keys_for_imported_record_types() {
         .match_records(QueryPlan::key(records, RecordKey::new("terminal-alpha")))
         .expect("explicit-key match succeeds");
 
-    assert_eq!(asserted.operation(), SemaOperation::Assert);
+    assert_eq!(asserted.operation(), MemoryOperation::Assert);
     assert_eq!(asserted.key().to_owned_string(), "terminal-alpha");
     assert_eq!(
         matched.records(),
@@ -166,8 +166,8 @@ fn engine_accepts_explicit_keys_for_imported_record_types() {
         .retract(Retraction::new(records, RecordKey::new("terminal-alpha")))
         .expect("explicit-key retract succeeds");
 
-    assert_eq!(mutated.operation(), SemaOperation::Mutate);
-    assert_eq!(retracted.operation(), SemaOperation::Retract);
+    assert_eq!(mutated.operation(), MemoryOperation::Mutate);
+    assert_eq!(retracted.operation(), MemoryOperation::Retract);
     assert_eq!(
         engine
             .current_commit_sequence()
@@ -373,7 +373,7 @@ fn identified_record_counter_survives_reopen_and_retract_advances_sequence() {
 
     assert_eq!(second.identifier(), RecordIdentifier::new(2));
     assert_eq!(second.commit_sequence(), CommitSequence::new(2));
-    assert_eq!(retraction.operation(), SemaOperation::Retract);
+    assert_eq!(retraction.operation(), MemoryOperation::Retract);
     assert_eq!(retraction.identifier(), RecordIdentifier::new(1));
     assert_eq!(retraction.commit_sequence(), CommitSequence::new(3));
     assert_eq!(remaining.records().len(), 1);
@@ -418,7 +418,7 @@ fn engine_mutates_identified_record_without_changing_identifier() {
         ))
         .expect_err("missing identified mutate is rejected");
 
-    assert_eq!(mutation.operation(), SemaOperation::Mutate);
+    assert_eq!(mutation.operation(), MemoryOperation::Mutate);
     assert_eq!(mutation.identifier(), RecordIdentifier::new(1));
     assert_eq!(mutation.commit_sequence(), CommitSequence::new(2));
     assert_eq!(mutation.snapshot(), SnapshotIdentifier::new(2));
@@ -452,7 +452,7 @@ fn engine_executes_mutate_and_retract_over_existing_record_family() {
         .match_records(QueryPlan::key(records, RecordKey::new("alpha")))
         .expect("match after mutate succeeds");
 
-    assert_eq!(mutation.operation(), SemaOperation::Mutate);
+    assert_eq!(mutation.operation(), MemoryOperation::Mutate);
     assert_eq!(mutation.commit_sequence(), CommitSequence::new(2));
     assert_eq!(mutation.snapshot(), SnapshotIdentifier::new(2));
     assert_eq!(updated.records(), &[ToyRecord::new("alpha", "second")]);
@@ -465,22 +465,22 @@ fn engine_executes_mutate_and_retract_over_existing_record_family() {
         .expect("match after retract succeeds");
     let log = engine.commit_log().expect("commit log reads");
 
-    assert_eq!(retraction.operation(), SemaOperation::Retract);
+    assert_eq!(retraction.operation(), MemoryOperation::Retract);
     assert_eq!(retraction.commit_sequence(), CommitSequence::new(3));
     assert_eq!(retraction.snapshot(), SnapshotIdentifier::new(3));
     assert!(removed.records().is_empty());
     assert_eq!(log.len(), 3);
     assert_eq!(
         log[0].operations().head().operation(),
-        SemaOperation::Assert
+        MemoryOperation::Assert
     );
     assert_eq!(
         log[1].operations().head().operation(),
-        SemaOperation::Mutate
+        MemoryOperation::Mutate
     );
     assert_eq!(
         log[2].operations().head().operation(),
-        SemaOperation::Retract
+        MemoryOperation::Retract
     );
 }
 
@@ -501,7 +501,7 @@ fn validate_dry_run_returns_validate_receipt_without_commit_log_write() {
         .expect("validate succeeds");
     let log_after = engine.commit_log().expect("commit log reads again");
 
-    assert_eq!(receipt.operation(), SemaOperation::Validate);
+    assert_eq!(receipt.operation(), MemoryOperation::Validate);
     assert_eq!(receipt.table().as_str(), "toy_records");
     assert_eq!(receipt.snapshot(), SnapshotIdentifier::new(1));
     assert_eq!(
@@ -581,9 +581,9 @@ fn commit_lands_write_bundle_under_one_snapshot() {
     assert_eq!(multi.snapshot(), SnapshotIdentifier::new(3));
     assert_eq!(multi.operation_count(), 3);
     let operations = multi.operations();
-    assert_eq!(operations.head().operation(), SemaOperation::Assert);
-    assert_eq!(operations.tail()[0].operation(), SemaOperation::Mutate);
-    assert_eq!(operations.tail()[1].operation(), SemaOperation::Retract);
+    assert_eq!(operations.head().operation(), MemoryOperation::Assert);
+    assert_eq!(operations.tail()[0].operation(), MemoryOperation::Mutate);
+    assert_eq!(operations.tail()[1].operation(), MemoryOperation::Retract);
 }
 
 #[test]
@@ -660,7 +660,7 @@ fn commit_duplicate_keys_return_typed_error_before_writing() {
     assert_eq!(log.len(), 1);
     assert_eq!(
         log[0].operations().head().operation(),
-        SemaOperation::Assert
+        MemoryOperation::Assert
     );
     assert_eq!(
         engine.latest_snapshot().unwrap(),
@@ -724,7 +724,7 @@ fn assert_against_existing_key_returns_typed_duplicate_assert_error() {
     assert_eq!(log.len(), 1);
     assert_eq!(
         log[0].operations().head().operation(),
-        SemaOperation::Assert
+        MemoryOperation::Assert
     );
     assert_eq!(
         engine.latest_snapshot().unwrap(),

@@ -1,6 +1,6 @@
 use crate::non_empty::NonEmpty;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 
 use crate::{CommitSequence, RecordKey, SnapshotIdentifier, TableName};
 
@@ -83,13 +83,13 @@ impl From<&crate::VersionedCommitLogEntry> for CommitLogEntry {
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub struct CommitLogOperation {
-    operation: SemaOperation,
+    operation: MemoryOperation,
     table_name: String,
     key: Option<RecordKey>,
 }
 
 impl CommitLogOperation {
-    pub fn new(operation: SemaOperation, table: TableName, key: Option<RecordKey>) -> Self {
+    pub fn new(operation: MemoryOperation, table: TableName, key: Option<RecordKey>) -> Self {
         Self {
             operation,
             table_name: table.into(),
@@ -97,7 +97,7 @@ impl CommitLogOperation {
         }
     }
 
-    pub fn operation(&self) -> SemaOperation {
+    pub fn operation(&self) -> MemoryOperation {
         self.operation
     }
 

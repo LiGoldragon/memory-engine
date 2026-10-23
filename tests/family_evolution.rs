@@ -16,7 +16,7 @@ use memory_engine::{
     VersionedStoreName, VersioningPolicy,
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 use tempfile::TempDir;
 
 const THOUGHTS: TableName = TableName::new("thoughts");
@@ -498,10 +498,10 @@ fn versioned_evolution_logs_retraction_and_assertion_as_row_history() {
 
     let operations: Vec<_> = evolution_entry.operations().iter().collect();
     assert_eq!(operations.len(), 2);
-    assert_eq!(operations[0].operation(), SemaOperation::Retract);
+    assert_eq!(operations[0].operation(), MemoryOperation::Retract);
     assert_eq!(operations[0].family().schema_hash(), fixture.hash_v1());
     assert_eq!(*operations[0].payload(), VersionedPayload::tombstone());
-    assert_eq!(operations[1].operation(), SemaOperation::Assert);
+    assert_eq!(operations[1].operation(), MemoryOperation::Assert);
     assert_eq!(operations[1].family().schema_hash(), fixture.hash_v2());
     assert_ne!(*operations[1].payload(), VersionedPayload::tombstone());
 

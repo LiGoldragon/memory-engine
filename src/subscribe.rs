@@ -2,7 +2,7 @@ use std::any::Any;
 use std::sync::{Arc, Mutex};
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 
 use crate::{QueryFilter, QueryPlan, QuerySnapshot, RecordKey, SnapshotIdentifier, TableName};
 
@@ -216,11 +216,11 @@ pub enum DeltaKind {
 }
 
 impl DeltaKind {
-    pub fn operation(&self) -> SemaOperation {
+    pub fn operation(&self) -> MemoryOperation {
         match self {
-            Self::Assert => SemaOperation::Assert,
-            Self::Mutate => SemaOperation::Mutate,
-            Self::Retract => SemaOperation::Retract,
+            Self::Assert => MemoryOperation::Assert,
+            Self::Mutate => MemoryOperation::Mutate,
+            Self::Retract => MemoryOperation::Retract,
         }
     }
 }

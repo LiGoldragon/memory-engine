@@ -1,6 +1,6 @@
 use crate::non_empty::NonEmpty;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 
 use crate::{Catalog, CommitSequence, RecordKey, SnapshotIdentifier, TableName, TableReference};
 
@@ -142,7 +142,7 @@ impl VersionedStoreName {
     }
 }
 
-/// The schema declaration name of a record family: the stable semantic
+/// The schema declaration name of a record family: the stable memoryntic
 /// identity that survives table renames. Replay dispatches on the
 /// family, never on the table coordinate.
 #[derive(
@@ -285,7 +285,7 @@ impl std::fmt::Display for StoreSchemaHash {
 }
 
 /// The full identity of a registered record family: the family name
-/// and per-family schema hash carry the durable semantic identity;
+/// and per-family schema hash carry the durable memoryntic identity;
 /// the table name is only the current storage coordinate.
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 #[rkyv(derive(Debug))]
@@ -462,7 +462,7 @@ impl VersionedPayload {
 
 #[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
 pub struct VersionedLogOperation {
-    operation: SemaOperation,
+    operation: MemoryOperation,
     family: FamilyIdentity,
     key: Option<RecordKey>,
     payload: VersionedPayload,
@@ -470,7 +470,7 @@ pub struct VersionedLogOperation {
 
 impl VersionedLogOperation {
     pub fn new(
-        operation: SemaOperation,
+        operation: MemoryOperation,
         family: FamilyIdentity,
         key: Option<RecordKey>,
         payload: VersionedPayload,
@@ -483,7 +483,7 @@ impl VersionedLogOperation {
         }
     }
 
-    pub fn operation(&self) -> SemaOperation {
+    pub fn operation(&self) -> MemoryOperation {
         self.operation
     }
 

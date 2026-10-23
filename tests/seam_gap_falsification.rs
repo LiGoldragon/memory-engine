@@ -423,7 +423,7 @@ fn cross_table_writes_via_two_engine_commits_are_not_engine_atomic() {
     //    When the schema genuinely requires multiple tables,
     //    grow the typed surface to accept a multi-table commit
     //    request, preserving commit-log + snapshot + delta
-    //    delivery semantics.
+    //    delivery memoryntics.
     // 3. **Document the constraint.** Consumers that hit it
     //    surface a contract-design issue; there is no raw-write
     //    path to reach for.

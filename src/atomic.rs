@@ -13,7 +13,7 @@ use rkyv::rancor::{self, Strategy};
 use rkyv::validation::Validator;
 use rkyv::validation::archive::ArchiveValidator;
 use rkyv::validation::shared::SharedValidator;
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 
 use crate::commit_log::CommitLog;
 use crate::engine::{COUNTERS, LATEST_COMMIT_SEQUENCE_KEY, LATEST_SNAPSHOT_KEY};
@@ -143,11 +143,11 @@ enum AtomicKind {
 }
 
 impl AtomicKind {
-    fn operation(self) -> SemaOperation {
+    fn operation(self) -> MemoryOperation {
         match self {
-            Self::Assert => SemaOperation::Assert,
-            Self::Mutate => SemaOperation::Mutate,
-            Self::Retract => SemaOperation::Retract,
+            Self::Assert => MemoryOperation::Assert,
+            Self::Mutate => MemoryOperation::Mutate,
+            Self::Retract => MemoryOperation::Retract,
         }
     }
 

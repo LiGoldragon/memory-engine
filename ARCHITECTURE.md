@@ -6,7 +6,7 @@ daemons.
 
 `memory` opens redb files, validates format/schema, and reads/writes typed
 rkyv tables behind the component-facing `.memory` file type. `memory-engine`
-executes `signal-sema` database operations over registered record
+executes `signal-memory` database operations over registered record
 families. Component daemons own actors, sockets, authorization, domain
 validation, and their own databases through `Engine`, not through raw
 redb calls.
@@ -195,7 +195,7 @@ sections that follow realize it.
   `Validate` engine operations.
 - `Constrain`, `Project`, `Aggregate`, `Infer`, and `Recurse` are memory-engine
   read-plan operators, not public contract roots.
-- The `signal_sema::SemaOperation` set is closed at six operations:
+- The `signal_memory::MemoryOperation` set is closed at six operations:
   `Assert`, `Mutate`, `Retract`, `Match`, `Subscribe`, and `Validate`.
   `Atomic` is not an operation; multi-operation atomicity is structural.
 - Schema/catalog operations are catalog data under the six operations, not a
@@ -207,7 +207,7 @@ sections that follow realize it.
   contract roots are domain verbs, and the daemon derives the Memory class
   from the dispatched request. These words must not appear as
   request-root tags, as an `AuthorizedSignalVerb` enum, or as a
-  payloadless `SemaObservation` event in any signal or meta-signal
+  payloadless `MemoryObservation` event in any signal or meta-signal
   contract. Legacy contracts that still carry the classification on the
   wire need a cleanup pass. Per Spirit 7l7l.
 - Unsupported read-plan operators return typed `UnsupportedReadPlan` errors
@@ -309,14 +309,14 @@ sections that follow realize it.
 
 ```mermaid
 flowchart TD
-    signal_sema["signal-sema<br/>SemaOperation"]
+    signal_memory["signal-memory<br/>MemoryOperation"]
     memory["memory<br/>storage kernel"]
     engine["memory-engine<br/>database operation execution"]
     component["component daemon<br/>Kameo actor tree"]
     database["component.memory"]
 
     engine --> memory
-    engine --> signal_sema
+    engine --> signal_memory
     component --> engine
     memory --> database
 ```

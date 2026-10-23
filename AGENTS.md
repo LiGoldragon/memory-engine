@@ -20,7 +20,7 @@ Memory database-operation execution.
 - Component daemons consume this crate instead of opening redb directly.
   redb belongs behind `memory`; component-facing database files use
   `.memory`.
-- Memory operations enter through `signal-sema` vocabulary. Component
+- Memory operations enter through `signal-memory` vocabulary. Component
   contracts own their domain-specific public operations and the daemon
   lowers them into engine calls.
 - Prefer improving `memory-engine` when ethos-derived components expose a

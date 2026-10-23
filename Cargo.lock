@@ -219,7 +219,7 @@ dependencies = [
  "blake3",
  "memory",
  "rkyv",
- "signal-sema",
+ "signal-memory",
  "tempfile",
  "thiserror",
 ]
@@ -383,9 +383,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
-name = "signal-sema"
+name = "signal-memory"
 version = "0.2.0"
-source = "git+https://github.com/LiGoldragon/signal-sema.git?rev=4f3a24e6677ab9d200672851016c4c760c1e36e8#4f3a24e6677ab9d200672851016c4c760c1e36e8"
+source = "git+https://github.com/LiGoldragon/signal-memory.git?rev=7f3251ed9b40345c0cc6f75b607472f78eeadcfc#7f3251ed9b40345c0cc6f75b607472f78eeadcfc"
 dependencies = [
  "rkyv",
  "thiserror",

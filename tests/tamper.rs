@@ -23,7 +23,7 @@ use memory_engine::{
 };
 use rkyv::rancor;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 use tempfile::TempDir;
 
 /// The engine's internal tables, redeclared for doctoring. The engine
@@ -224,7 +224,7 @@ fn forged_replacement(genuine: &VersionedCommitLogEntry, body: &str) -> Versione
         genuine.snapshot(),
         genuine.previous_entry_digest(),
         NonEmpty::single(VersionedLogOperation::new(
-            SemaOperation::Assert,
+            MemoryOperation::Assert,
             operation.family().clone(),
             Some(key),
             VersionedPayload::record(payload.as_slice().to_vec()),

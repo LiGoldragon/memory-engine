@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 
 use rkyv::api::high::HighDeserializer;
 use rkyv::bytecheck::CheckBytes;
@@ -617,7 +617,7 @@ impl RecursionMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuerySnapshot<RecordValue> {
-    operation: SemaOperation,
+    operation: MemoryOperation,
     table: TableName,
     database_marker: DatabaseMarker,
     records: Vec<RecordValue>,
@@ -625,7 +625,7 @@ pub struct QuerySnapshot<RecordValue> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdentifiedQuerySnapshot<RecordValue> {
-    operation: SemaOperation,
+    operation: MemoryOperation,
     table: TableName,
     database_marker: DatabaseMarker,
     records: Vec<IdentifiedRecord<RecordValue>>,
@@ -633,7 +633,7 @@ pub struct IdentifiedQuerySnapshot<RecordValue> {
 
 impl<RecordValue> QuerySnapshot<RecordValue> {
     pub fn new(
-        operation: SemaOperation,
+        operation: MemoryOperation,
         table: TableName,
         database_marker: DatabaseMarker,
         records: Vec<RecordValue>,
@@ -646,7 +646,7 @@ impl<RecordValue> QuerySnapshot<RecordValue> {
         }
     }
 
-    pub fn operation(&self) -> SemaOperation {
+    pub fn operation(&self) -> MemoryOperation {
         self.operation
     }
 
@@ -669,7 +669,7 @@ impl<RecordValue> QuerySnapshot<RecordValue> {
 
 impl<RecordValue> IdentifiedQuerySnapshot<RecordValue> {
     pub fn new(
-        operation: SemaOperation,
+        operation: MemoryOperation,
         table: TableName,
         database_marker: DatabaseMarker,
         records: Vec<IdentifiedRecord<RecordValue>>,
@@ -682,7 +682,7 @@ impl<RecordValue> IdentifiedQuerySnapshot<RecordValue> {
         }
     }
 
-    pub fn operation(&self) -> SemaOperation {
+    pub fn operation(&self) -> MemoryOperation {
         self.operation
     }
 
@@ -709,7 +709,7 @@ impl<RecordValue> IdentifiedQuerySnapshot<RecordValue> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidationReceipt {
-    operation: SemaOperation,
+    operation: MemoryOperation,
     table: TableName,
     database_marker: DatabaseMarker,
     record_count: usize,
@@ -717,7 +717,7 @@ pub struct ValidationReceipt {
 
 impl ValidationReceipt {
     pub fn new(
-        operation: SemaOperation,
+        operation: MemoryOperation,
         table: TableName,
         database_marker: DatabaseMarker,
         record_count: usize,
@@ -730,7 +730,7 @@ impl ValidationReceipt {
         }
     }
 
-    pub fn operation(&self) -> SemaOperation {
+    pub fn operation(&self) -> MemoryOperation {
         self.operation
     }
 

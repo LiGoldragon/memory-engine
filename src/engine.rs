@@ -8,7 +8,7 @@ use rkyv::rancor::{self, Strategy};
 use rkyv::validation::Validator;
 use rkyv::validation::archive::ArchiveValidator;
 use rkyv::validation::shared::SharedValidator;
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 
 use crate::catalog::FamilyRegistration;
 use crate::checkpoint::{
@@ -277,13 +277,13 @@ impl Engine {
         for (key, _row) in carried {
             let record_key = crate::RecordKey::new(key.clone());
             log_operations.push(CommitLogOperation::new(
-                SemaOperation::Retract,
+                MemoryOperation::Retract,
                 name,
                 Some(record_key.clone()),
             ));
             if self.versioning_policy.is_some() {
                 versioned_operations.push(VersionedLogOperation::new(
-                    SemaOperation::Retract,
+                    MemoryOperation::Retract,
                     stored.clone(),
                     Some(record_key),
                     VersionedPayload::tombstone(),
@@ -293,13 +293,13 @@ impl Engine {
         for (key, row) in carried {
             let record_key = crate::RecordKey::new(key.clone());
             log_operations.push(CommitLogOperation::new(
-                SemaOperation::Assert,
+                MemoryOperation::Assert,
                 name,
                 Some(record_key.clone()),
             ));
             if self.versioning_policy.is_some() {
                 versioned_operations.push(VersionedLogOperation::new(
-                    SemaOperation::Assert,
+                    MemoryOperation::Assert,
                     evolved_identity.clone(),
                     Some(record_key),
                     self.versioned_record_payload(name, row)?,
@@ -403,7 +403,7 @@ impl Engine {
             commit_sequence,
             snapshot,
             CommitLogOperation::new(
-                SemaOperation::Assert,
+                MemoryOperation::Assert,
                 *assertion.table().name(),
                 Some(key.clone()),
             ),
@@ -411,7 +411,7 @@ impl Engine {
         let versioned_entry = self.versioned_record_entry(
             commit_sequence,
             snapshot,
-            SemaOperation::Assert,
+            MemoryOperation::Assert,
             *assertion.table().name(),
             Some(key),
             assertion.record(),
@@ -437,7 +437,7 @@ impl Engine {
         })?;
 
         Ok(IdentifiedMutationReceipt::new(
-            SemaOperation::Assert,
+            MemoryOperation::Assert,
             *assertion.table().name(),
             identifier,
             commit_sequence,
@@ -483,7 +483,7 @@ impl Engine {
             commit_sequence,
             snapshot,
             CommitLogOperation::new(
-                SemaOperation::Retract,
+                MemoryOperation::Retract,
                 *retraction.table().name(),
                 Some(key.clone()),
             ),
@@ -491,7 +491,7 @@ impl Engine {
         let versioned_entry = self.versioned_tombstone_entry(
             commit_sequence,
             snapshot,
-            SemaOperation::Retract,
+            MemoryOperation::Retract,
             *retraction.table().name(),
             Some(key),
         )?;
@@ -524,7 +524,7 @@ impl Engine {
         }
 
         Ok(IdentifiedMutationReceipt::new(
-            SemaOperation::Retract,
+            MemoryOperation::Retract,
             *retraction.table().name(),
             retraction.identifier(),
             commit_sequence,
@@ -568,7 +568,7 @@ impl Engine {
             commit_sequence,
             snapshot,
             CommitLogOperation::new(
-                SemaOperation::Mutate,
+                MemoryOperation::Mutate,
                 *mutation.table().name(),
                 Some(key.clone()),
             ),
@@ -576,7 +576,7 @@ impl Engine {
         let versioned_entry = self.versioned_record_entry(
             commit_sequence,
             snapshot,
-            SemaOperation::Mutate,
+            MemoryOperation::Mutate,
             *mutation.table().name(),
             Some(key),
             mutation.record(),
@@ -600,7 +600,7 @@ impl Engine {
         })?;
 
         Ok(IdentifiedMutationReceipt::new(
-            SemaOperation::Mutate,
+            MemoryOperation::Mutate,
             *mutation.table().name(),
             mutation.identifier(),
             commit_sequence,
@@ -666,7 +666,7 @@ impl Engine {
             commit_sequence,
             snapshot,
             CommitLogOperation::new(
-                SemaOperation::Assert,
+                MemoryOperation::Assert,
                 *assertion.table().name(),
                 Some(key.clone()),
             ),
@@ -674,7 +674,7 @@ impl Engine {
         let versioned_entry = self.versioned_record_entry(
             commit_sequence,
             snapshot,
-            SemaOperation::Assert,
+            MemoryOperation::Assert,
             *assertion.table().name(),
             Some(key.clone()),
             assertion.record(),
@@ -705,7 +705,7 @@ impl Engine {
         );
 
         let receipt = crate::MutationReceipt::new(
-            SemaOperation::Assert,
+            MemoryOperation::Assert,
             *assertion.table().name(),
             key,
             commit_sequence,
@@ -774,7 +774,7 @@ impl Engine {
             commit_sequence,
             snapshot,
             CommitLogOperation::new(
-                SemaOperation::Mutate,
+                MemoryOperation::Mutate,
                 *mutation.table().name(),
                 Some(key.clone()),
             ),
@@ -782,7 +782,7 @@ impl Engine {
         let versioned_entry = self.versioned_record_entry(
             commit_sequence,
             snapshot,
-            SemaOperation::Mutate,
+            MemoryOperation::Mutate,
             *mutation.table().name(),
             Some(key.clone()),
             mutation.record(),
@@ -813,7 +813,7 @@ impl Engine {
         );
 
         let receipt = crate::MutationReceipt::new(
-            SemaOperation::Mutate,
+            MemoryOperation::Mutate,
             *mutation.table().name(),
             key,
             commit_sequence,
@@ -860,7 +860,7 @@ impl Engine {
             commit_sequence,
             snapshot,
             CommitLogOperation::new(
-                SemaOperation::Retract,
+                MemoryOperation::Retract,
                 *retraction.table().name(),
                 Some(key.clone()),
             ),
@@ -868,7 +868,7 @@ impl Engine {
         let versioned_entry = self.versioned_tombstone_entry(
             commit_sequence,
             snapshot,
-            SemaOperation::Retract,
+            MemoryOperation::Retract,
             *retraction.table().name(),
             Some(key.clone()),
         )?;
@@ -906,7 +906,7 @@ impl Engine {
         );
 
         let receipt = crate::MutationReceipt::new(
-            SemaOperation::Retract,
+            MemoryOperation::Retract,
             *retraction.table().name(),
             key,
             commit_sequence,
@@ -973,13 +973,13 @@ impl Engine {
                         return Err(self.duplicate_assert_key(request.table(), &key));
                     }
                     log_operations.push(CommitLogOperation::new(
-                        SemaOperation::Assert,
+                        MemoryOperation::Assert,
                         *request.table().name(),
                         Some(key.clone()),
                     ));
                     if let Some(family) = versioned_family.as_ref() {
                         versioned_operations.push(VersionedLogOperation::new(
-                            SemaOperation::Assert,
+                            MemoryOperation::Assert,
                             family.clone(),
                             Some(key.clone()),
                             self.versioned_record_payload(*request.table().name(), record)?,
@@ -1005,13 +1005,13 @@ impl Engine {
                         return Err(self.record_not_found(request.table(), &key));
                     }
                     log_operations.push(CommitLogOperation::new(
-                        SemaOperation::Mutate,
+                        MemoryOperation::Mutate,
                         *request.table().name(),
                         Some(key.clone()),
                     ));
                     if let Some(family) = versioned_family.as_ref() {
                         versioned_operations.push(VersionedLogOperation::new(
-                            SemaOperation::Mutate,
+                            MemoryOperation::Mutate,
                             family.clone(),
                             Some(key.clone()),
                             self.versioned_record_payload(*request.table().name(), record)?,
@@ -1033,13 +1033,13 @@ impl Engine {
                         return Err(self.record_not_found(request.table(), key));
                     };
                     log_operations.push(CommitLogOperation::new(
-                        SemaOperation::Retract,
+                        MemoryOperation::Retract,
                         *request.table().name(),
                         Some(key.clone()),
                     ));
                     if let Some(family) = versioned_family.as_ref() {
                         versioned_operations.push(VersionedLogOperation::new(
-                            SemaOperation::Retract,
+                            MemoryOperation::Retract,
                             family.clone(),
                             Some(key.clone()),
                             VersionedPayload::tombstone(),
@@ -1158,7 +1158,7 @@ impl Engine {
         let records = records?;
 
         Ok(QuerySnapshot::new(
-            SemaOperation::Match,
+            MemoryOperation::Match,
             *query.table().name(),
             database_marker,
             records,
@@ -1245,7 +1245,7 @@ impl Engine {
         };
 
         Ok(IdentifiedQuerySnapshot::new(
-            SemaOperation::Match,
+            MemoryOperation::Match,
             *query.table().name(),
             database_marker,
             records,
@@ -1266,7 +1266,7 @@ impl Engine {
         let table = *query.table().name();
         let snapshot = self.match_records(query)?;
         Ok(crate::ValidationReceipt::new(
-            SemaOperation::Validate,
+            MemoryOperation::Validate,
             table,
             snapshot.database_marker(),
             snapshot.records().len(),
@@ -1509,21 +1509,21 @@ impl Engine {
                         family: registered.family().as_str().to_owned(),
                     })?;
                 match operation.operation() {
-                    SemaOperation::Assert => {
+                    MemoryOperation::Assert => {
                         self.assert_keyed(KeyedAssertion::new(
                             *replay.table(),
                             key,
                             self.replayed_record(replay.table(), operation.payload())?,
                         ))?;
                     }
-                    SemaOperation::Mutate => {
+                    MemoryOperation::Mutate => {
                         self.mutate_keyed(KeyedMutation::new(
                             *replay.table(),
                             key,
                             self.replayed_record(replay.table(), operation.payload())?,
                         ))?;
                     }
-                    SemaOperation::Retract => {
+                    MemoryOperation::Retract => {
                         self.retract(Retraction::new(*replay.table(), key))?;
                     }
                     other => {
@@ -2411,7 +2411,7 @@ impl Engine {
         let mut identified_advances: HashMap<String, u64> = HashMap::new();
         for entry in group.entries() {
             for operation in entry.operations() {
-                if operation.operation() == SemaOperation::Assert
+                if operation.operation() == MemoryOperation::Assert
                     && let Some(crate::RecordKey::Identifier(identifier)) = operation.key()
                 {
                     identified_advances.insert(
@@ -2484,13 +2484,13 @@ impl Engine {
                     continue;
                 };
                 let (kind, bytes) = match (operation.operation(), operation.payload()) {
-                    (SemaOperation::Assert, VersionedPayload::Record { bytes }) => {
+                    (MemoryOperation::Assert, VersionedPayload::Record { bytes }) => {
                         (DeltaKind::Assert, bytes.clone())
                     }
-                    (SemaOperation::Mutate, VersionedPayload::Record { bytes }) => {
+                    (MemoryOperation::Mutate, VersionedPayload::Record { bytes }) => {
                         (DeltaKind::Mutate, bytes.clone())
                     }
-                    (SemaOperation::Retract, _) => {
+                    (MemoryOperation::Retract, _) => {
                         let Some(pre_image) = group.retract_pre_image(entry_index, operation_index)
                         else {
                             continue;
@@ -2621,10 +2621,10 @@ impl Engine {
             self.versioned_record_payload(*assertion.table().name(), assertion.record())?;
         session.set_overlay(table_name, &key, OverlayPresence::Present);
         let (commit_sequence, snapshot) = session.append_entry(NonEmpty::single(
-            VersionedLogOperation::new(SemaOperation::Assert, family, Some(key.clone()), payload),
+            VersionedLogOperation::new(MemoryOperation::Assert, family, Some(key.clone()), payload),
         ));
         Ok(crate::MutationReceipt::new(
-            SemaOperation::Assert,
+            MemoryOperation::Assert,
             *assertion.table().name(),
             key,
             commit_sequence,
@@ -2655,10 +2655,10 @@ impl Engine {
         let payload = self.versioned_record_payload(*mutation.table().name(), mutation.record())?;
         session.set_overlay(table_name, &key, OverlayPresence::Present);
         let (commit_sequence, snapshot) = session.append_entry(NonEmpty::single(
-            VersionedLogOperation::new(SemaOperation::Mutate, family, Some(key.clone()), payload),
+            VersionedLogOperation::new(MemoryOperation::Mutate, family, Some(key.clone()), payload),
         ));
         Ok(crate::MutationReceipt::new(
-            SemaOperation::Mutate,
+            MemoryOperation::Mutate,
             *mutation.table().name(),
             key,
             commit_sequence,
@@ -2701,13 +2701,13 @@ impl Engine {
         session.park_pre_image(0, pre_image);
         let (commit_sequence, snapshot) =
             session.append_entry(NonEmpty::single(VersionedLogOperation::new(
-                SemaOperation::Retract,
+                MemoryOperation::Retract,
                 family,
                 Some(key.clone()),
                 VersionedPayload::tombstone(),
             )));
         Ok(crate::MutationReceipt::new(
-            SemaOperation::Retract,
+            MemoryOperation::Retract,
             *retraction.table().name(),
             key,
             commit_sequence,
@@ -2741,10 +2741,10 @@ impl Engine {
             OverlayPresence::Present,
         );
         let (commit_sequence, snapshot) = session.append_entry(NonEmpty::single(
-            VersionedLogOperation::new(SemaOperation::Assert, family, Some(key), payload),
+            VersionedLogOperation::new(MemoryOperation::Assert, family, Some(key), payload),
         ));
         Ok(IdentifiedMutationReceipt::new(
-            SemaOperation::Assert,
+            MemoryOperation::Assert,
             *assertion.table().name(),
             identifier,
             commit_sequence,
@@ -2775,10 +2775,10 @@ impl Engine {
         let payload = self.versioned_record_payload(*mutation.table().name(), mutation.record())?;
         session.set_overlay(table_name, &key, OverlayPresence::Present);
         let (commit_sequence, snapshot) = session.append_entry(NonEmpty::single(
-            VersionedLogOperation::new(SemaOperation::Mutate, family, Some(key), payload),
+            VersionedLogOperation::new(MemoryOperation::Mutate, family, Some(key), payload),
         ));
         Ok(IdentifiedMutationReceipt::new(
-            SemaOperation::Mutate,
+            MemoryOperation::Mutate,
             *mutation.table().name(),
             mutation.identifier(),
             commit_sequence,
@@ -2823,13 +2823,13 @@ impl Engine {
         session.park_pre_image(0, pre_image);
         let (commit_sequence, snapshot) =
             session.append_entry(NonEmpty::single(VersionedLogOperation::new(
-                SemaOperation::Retract,
+                MemoryOperation::Retract,
                 family,
                 Some(key),
                 VersionedPayload::tombstone(),
             )));
         Ok(IdentifiedMutationReceipt::new(
-            SemaOperation::Retract,
+            MemoryOperation::Retract,
             *retraction.table().name(),
             retraction.identifier(),
             commit_sequence,
@@ -2868,7 +2868,7 @@ impl Engine {
                         return Err(self.duplicate_assert_key(request.table(), &key));
                     }
                     operations.push(VersionedLogOperation::new(
-                        SemaOperation::Assert,
+                        MemoryOperation::Assert,
                         family.clone(),
                         Some(key.clone()),
                         self.versioned_record_payload(*request.table().name(), record)?,
@@ -2886,7 +2886,7 @@ impl Engine {
                         return Err(self.record_not_found(request.table(), &key));
                     }
                     operations.push(VersionedLogOperation::new(
-                        SemaOperation::Mutate,
+                        MemoryOperation::Mutate,
                         family.clone(),
                         Some(key.clone()),
                         self.versioned_record_payload(*request.table().name(), record)?,
@@ -2914,7 +2914,7 @@ impl Engine {
                         return Err(self.record_not_found(request.table(), key));
                     };
                     operations.push(VersionedLogOperation::new(
-                        SemaOperation::Retract,
+                        MemoryOperation::Retract,
                         family.clone(),
                         Some(key.clone()),
                         VersionedPayload::tombstone(),
@@ -3036,7 +3036,7 @@ impl Engine {
             .node()
             .select(&crate::query::OverlaidRows::new(rows))?;
         Ok(QuerySnapshot::new(
-            SemaOperation::Match,
+            MemoryOperation::Match,
             *query.table().name(),
             database_marker,
             records,
@@ -3104,7 +3104,7 @@ impl Engine {
                 .collect(),
         };
         Ok(IdentifiedQuerySnapshot::new(
-            SemaOperation::Match,
+            MemoryOperation::Match,
             *query.table().name(),
             database_marker,
             records,
@@ -3529,7 +3529,7 @@ impl Engine {
         &self,
         commit_sequence: crate::CommitSequence,
         snapshot: SnapshotIdentifier,
-        operation: SemaOperation,
+        operation: MemoryOperation,
         table_name: TableName,
         key: Option<crate::RecordKey>,
         record: &RecordValue,
@@ -3561,7 +3561,7 @@ impl Engine {
         &self,
         commit_sequence: crate::CommitSequence,
         snapshot: SnapshotIdentifier,
-        operation: SemaOperation,
+        operation: MemoryOperation,
         table_name: TableName,
         key: Option<crate::RecordKey>,
     ) -> Result<Option<VersionedCommitLogEntry>> {
@@ -3657,7 +3657,7 @@ impl Engine {
 
     pub(crate) fn atomic_versioned_operation(
         &self,
-        operation: SemaOperation,
+        operation: MemoryOperation,
         table: TableName,
         key: RecordKey,
         payload: VersionedPayload,

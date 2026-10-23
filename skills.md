@@ -14,7 +14,7 @@ This repository follows the workspace skills in `/home/li/primary/skills/`.
   daemons lower their domain records into engine plans.
 - Keep redb behind the `memory` kernel. Engine consumers open `.memory`
   files through `EngineOpen`; they do not import redb.
-- Use domain-keyed tables for records with stable semantic keys and
+- Use domain-keyed tables for records with stable memoryntic keys and
   identified tables for ethos contracts that need engine-assigned
   numeric record identifiers.
 - Add a constraint test when adding an architectural rule.

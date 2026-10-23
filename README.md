@@ -1,14 +1,14 @@
 # memory-engine
 
 `memory-engine` is the full database engine library over `memory` and
-`signal-sema`. It executes typed database verbs over component-owned
+`signal-memory`. It executes typed database verbs over component-owned
 `.memory` files.
 
 It is library-only: no daemon, no actors, no sockets, no NOTA parser,
 and no Persona-specific contract dependencies.
 
 Current implemented surface: registered record families and the six
-`signal-sema` operation classes `Assert`, `Mutate`, `Retract`, `Match`,
+`signal-memory` operation classes `Assert`, `Mutate`, `Retract`, `Match`,
 `Subscribe`, and `Validate`. Multi-operation atomicity is structural — `Engine::commit`
 takes a typed `CommitRequest<RecordValue>` (a non-empty sequence of
 `WriteOperation`s for one registered table) and lands it under a single
@@ -18,7 +18,7 @@ operation-log replay, `list_tables`, and the first `Subscribe` primitive
 also implemented. Executable read plans cover all rows, exact key, and
 key range. Query-algebra operators `Constrain`, `Project`, `Aggregate`,
 `Infer`, and `Recurse` live here as typed plan nodes and return a typed
-`UnsupportedReadPlan` error until execution semantics land. Subscription
+`UnsupportedReadPlan` error until execution memoryntics land. Subscription
 sinks may use detached delivery for blocking consumers or inline delivery
 for actor enqueue consumers that need deterministic post-commit ordering
 without polling.

@@ -5,7 +5,7 @@ edition      = "2024"
 rust-version = "1.89"
 license      = "MIT OR Apache-2.0"
 repository   = "https://github.com/LiGoldragon/memory-engine"
-description  = "Typed database operation engine over memory and signal-sema"
+description  = "Typed database operation engine over memory and signal-memory"
 publish      = false
 
 [lib]
@@ -16,7 +16,7 @@ path = "src/lib.rs"
 blake3 = "1"
 rkyv = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
 memory = { git = "https://github.com/LiGoldragon/memory.git", rev = "69d91c486b335575ee5e4b0eb79da27094e700b6" }
-signal-sema = { git = "https://github.com/LiGoldragon/signal-sema.git", rev = "4f3a24e6677ab9d200672851016c4c760c1e36e8", default-features = false }
+signal-memory = { git = "https://github.com/LiGoldragon/signal-memory.git", rev = "7f3251ed9b40345c0cc6f75b607472f78eeadcfc", default-features = false }
 thiserror = "2"
 
 [dev-dependencies]

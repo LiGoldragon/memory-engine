@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 
 struct RepositoryFixture {
     root: PathBuf,
@@ -113,7 +113,12 @@ fn memory_engine_normal_dependency_tree_is_one_exact_runtime_family() {
     );
 
     let tree = fixture.cargo_tree(&["--edges", "normal", "--no-default-features"]);
-    for build_time_only in ["schema-rust", "sema-translator", "core-ethos", "core-nomos"] {
+    for build_time_only in [
+        "schema-rust",
+        "memory-translator",
+        "core-ethos",
+        "core-nomos",
+    ] {
         assert!(
             !tree.contains(build_time_only),
             "{build_time_only} must remain source-generation machinery, not runtime substrate:\n{tree}"
@@ -131,7 +136,7 @@ fn table_specification_fixture_is_owned_by_the_engine() {
         "core-ethos",
         "core-nomos",
         "rust-logos",
-        "sema-translator",
+        "memory-translator",
         "structural-codec",
     ] {
         assert!(
@@ -150,14 +155,14 @@ fn memory_engine_does_not_depend_on_raw_redb_directly() {
 }
 
 #[test]
-fn memory_engine_depends_on_storage_kernel_and_signal_sema_by_git() {
+fn memory_engine_depends_on_storage_kernel_and_signal_memory_by_git() {
     let fixture = RepositoryFixture::current();
     let cargo = fixture.cargo_toml();
 
     assert!(cargo.contains("https://github.com/LiGoldragon/memory.git"));
-    assert!(cargo.contains("https://github.com/LiGoldragon/signal-sema.git"));
+    assert!(cargo.contains("https://github.com/LiGoldragon/signal-memory.git"));
     assert!(!cargo.contains("path = \"../memory\""));
-    assert!(!cargo.contains("path = \"../signal-sema\""));
+    assert!(!cargo.contains("path = \"../signal-memory\""));
     assert!(
         !cargo.contains("signal-core"),
         "memory-engine must not depend on the retired signal-core crate"
@@ -177,37 +182,37 @@ fn memory_engine_owns_read_plan_vocabulary() {
             "{operator} must live in memory-engine read-plan vocabulary"
         );
     }
-    assert!(cargo.contains("signal-sema"));
+    assert!(cargo.contains("signal-memory"));
 }
 
 #[test]
-fn signal_sema_operation_set_is_closed_at_six_operations_without_atomic() {
+fn signal_memory_operation_set_is_closed_at_six_operations_without_atomic() {
     let operations = [
-        SemaOperation::Assert,
-        SemaOperation::Mutate,
-        SemaOperation::Retract,
-        SemaOperation::Match,
-        SemaOperation::Subscribe,
-        SemaOperation::Validate,
+        MemoryOperation::Assert,
+        MemoryOperation::Mutate,
+        MemoryOperation::Retract,
+        MemoryOperation::Match,
+        MemoryOperation::Subscribe,
+        MemoryOperation::Validate,
     ];
 
     assert_eq!(operations.len(), 6);
     for operation in operations {
-        assert!(SemaOperationWitness::accepts(operation));
+        assert!(MemoryOperationWitness::accepts(operation));
     }
 }
 
-struct SemaOperationWitness;
+struct MemoryOperationWitness;
 
-impl SemaOperationWitness {
-    fn accepts(operation: SemaOperation) -> bool {
+impl MemoryOperationWitness {
+    fn accepts(operation: MemoryOperation) -> bool {
         match operation {
-            SemaOperation::Assert
-            | SemaOperation::Mutate
-            | SemaOperation::Retract
-            | SemaOperation::Match
-            | SemaOperation::Subscribe
-            | SemaOperation::Validate => true,
+            MemoryOperation::Assert
+            | MemoryOperation::Mutate
+            | MemoryOperation::Retract
+            | MemoryOperation::Match
+            | MemoryOperation::Subscribe
+            | MemoryOperation::Validate => true,
         }
     }
 }

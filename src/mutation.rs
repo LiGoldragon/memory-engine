@@ -1,4 +1,4 @@
-use signal_sema::SemaOperation;
+use signal_memory::MemoryOperation;
 
 use crate::{
     CommitSequence, DatabaseMarker, EngineRecord, IdentifiedTableReference, RecordIdentifier,
@@ -52,7 +52,7 @@ impl<RecordValue> KeyedAssertion<RecordValue> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MutationReceipt {
-    operation: SemaOperation,
+    operation: MemoryOperation,
     table: TableName,
     key: RecordKey,
     commit_sequence: CommitSequence,
@@ -80,7 +80,7 @@ pub struct IdentifiedMutation<RecordValue> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdentifiedMutationReceipt {
-    operation: SemaOperation,
+    operation: MemoryOperation,
     table: TableName,
     identifier: RecordIdentifier,
     commit_sequence: CommitSequence,
@@ -89,7 +89,7 @@ pub struct IdentifiedMutationReceipt {
 
 impl MutationReceipt {
     pub fn new(
-        operation: SemaOperation,
+        operation: MemoryOperation,
         table: TableName,
         key: RecordKey,
         commit_sequence: CommitSequence,
@@ -104,7 +104,7 @@ impl MutationReceipt {
         }
     }
 
-    pub fn operation(&self) -> SemaOperation {
+    pub fn operation(&self) -> MemoryOperation {
         self.operation
     }
 
@@ -185,7 +185,7 @@ impl<RecordValue> IdentifiedMutation<RecordValue> {
 
 impl IdentifiedMutationReceipt {
     pub fn new(
-        operation: SemaOperation,
+        operation: MemoryOperation,
         table: TableName,
         identifier: RecordIdentifier,
         commit_sequence: CommitSequence,
@@ -200,7 +200,7 @@ impl IdentifiedMutationReceipt {
         }
     }
 
-    pub fn operation(&self) -> SemaOperation {
+    pub fn operation(&self) -> MemoryOperation {
         self.operation
     }
 
@@ -364,11 +364,11 @@ pub enum WriteOperation<RecordValue> {
 }
 
 impl<RecordValue> WriteOperation<RecordValue> {
-    pub fn operation(&self) -> SemaOperation {
+    pub fn operation(&self) -> MemoryOperation {
         match self {
-            Self::Assert(_) => SemaOperation::Assert,
-            Self::Mutate(_) => SemaOperation::Mutate,
-            Self::Retract(_) => SemaOperation::Retract,
+            Self::Assert(_) => MemoryOperation::Assert,
+            Self::Mutate(_) => MemoryOperation::Mutate,
+            Self::Retract(_) => MemoryOperation::Retract,
         }
     }
 }

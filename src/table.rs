@@ -54,7 +54,7 @@ pub trait TableSpecification {
     ///
     /// Implementors must provide this explicitly.  The engine deliberately
     /// has no generic rkyv-key encoder: archive bytes are evidence of a value
-    /// layout, not an unlicensed replacement for its source key semantics.
+    /// layout, not an unlicensed replacement for its source key memoryntics.
     fn record_key(key: &Self::Key) -> Result<RecordKey>;
 
     /// Build a keyed assertion whose key type is fixed by this declaration.
