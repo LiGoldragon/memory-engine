@@ -8,10 +8,57 @@
 mod note_family;
 
 use note_family::{Note, NoteStore, NoteUpgradeRefusal, NoteV1};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use sema_engine::{
-    Engine, Error, MemoryDefinition, MemoryUpgrades, MemoryVersion, QueryPlan, RecordKey,
-    StoragePhase, UpgradeFault, UpgradeOutcome,
+    Assertion, Decision, Engine, EngineRecord, Error, FamilyName, MemoryDefinition, MemoryUpgrades,
+    MemoryVersion, QueryPlan, RecordKey, SchemaHash, StoragePhase, TableDescriptor, TableName,
+    UpgradeFault, UpgradeOutcome,
 };
+use std::convert::Infallible;
+
+const CONTEXT: TableName = TableName::new("note_context");
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+struct NoteContext {
+    id: String,
+    mood: String,
+}
+
+impl EngineRecord for NoteContext {
+    fn record_key(&self) -> RecordKey {
+        RecordKey::new(self.id.clone())
+    }
+}
+
+impl MemoryDefinition for NoteContext {
+    fn memory_version() -> MemoryVersion {
+        MemoryVersion::new(1)
+    }
+
+    fn schema_hash() -> SchemaHash {
+        SchemaHash::for_label("note-context-v1")
+    }
+}
+
+fn context(engine: &mut Engine, id: &str, mood: &str) -> sema_engine::TableReference<NoteContext> {
+    let table = engine
+        .register_table(TableDescriptor::new(
+            CONTEXT,
+            FamilyName::new("note-context"),
+            NoteContext::schema_hash(),
+        ))
+        .expect("context registers");
+    engine
+        .assert(Assertion::new(
+            table,
+            NoteContext {
+                id: id.into(),
+                mood: mood.into(),
+            },
+        ))
+        .expect("context persists");
+    table
+}
 
 fn seed(store: &NoteStore, rows: &[NoteV1]) {
     let mut engine = store.open();
@@ -205,4 +252,93 @@ fn a_store_holding_no_predecessor_needs_no_upgrade() {
     let (marker, rows) = store.raw_v2();
     assert_eq!(marker, Note::schema_hash());
     assert!(rows.is_empty());
+}
+
+#[test]
+fn a_contextual_upgrade_reads_the_typed_context_and_lands_the_family() {
+    let store = NoteStore::new();
+    seed(&store, &[NoteV1::new("alpha", "Groceries\nmilk")]);
+    let mut engine = store.open();
+    let context = context(&mut engine, "alpha", "urgent");
+
+    let outcome = engine.upgrade_table_with_context::<NoteV1, Note, NoteContext, Infallible, _>(
+        store.descriptor_v2(),
+        context,
+        |previous, context| {
+            let mood = context
+                .iter()
+                .find(|(key, row)| key == &previous.id && row.id == previous.id)
+                .map(|(_, row)| row.mood.as_str())
+                .expect("matching context is in the same snapshot");
+            Decision::Ready(Note::new(
+                &previous.id,
+                previous.text.lines().next().expect("title"),
+                mood,
+            ))
+        },
+    );
+    let UpgradeOutcome::Upgraded(receipt) = outcome else {
+        panic!("contextual upgrade lands, got {outcome:?}");
+    };
+    assert_eq!(
+        sorted(&engine, receipt.table()),
+        vec![Note::new("alpha", "Groceries", "urgent")]
+    );
+}
+
+#[test]
+fn an_interrupted_contextual_upgrade_reopens_as_the_predecessor_and_retries() {
+    let store = NoteStore::new();
+    let seeded = [NoteV1::new("alpha", "Groceries\nmilk")];
+    seed(&store, &seeded);
+    let mut engine = store.open();
+    let context = context(&mut engine, "alpha", "urgent");
+    engine.interrupt_upgrade_at(UpgradeFault::AfterRowsWritten);
+    let convert = |previous: NoteV1, context: &[(String, NoteContext)]| {
+        let mood = context
+            .iter()
+            .find(|(key, row)| key == &previous.id && row.id == previous.id)
+            .map(|(_, row)| row.mood.clone())
+            .expect("matching context");
+        Decision::<Note, Infallible>::Ready(Note::new(
+            &previous.id,
+            previous.text.lines().next().expect("title"),
+            &mood,
+        ))
+    };
+    let outcome = engine.upgrade_table_with_context::<NoteV1, Note, NoteContext, Infallible, _>(
+        store.descriptor_v2(),
+        context,
+        convert,
+    );
+    let UpgradeOutcome::Failed(failure) = outcome else {
+        panic!("interruption fails the upgrade, got {outcome:?}");
+    };
+    assert_eq!(failure.phase(), StoragePhase::Commit);
+    assert!(failure.is_unchanged());
+    drop(engine);
+    assert_eq!(
+        store
+            .raw_v1()
+            .1
+            .into_iter()
+            .map(|(_, row)| row)
+            .collect::<Vec<_>>(),
+        seeded
+    );
+
+    let mut reopened = store.open();
+    let context = reopened
+        .register_table(TableDescriptor::new(
+            CONTEXT,
+            FamilyName::new("note-context"),
+            NoteContext::schema_hash(),
+        ))
+        .expect("context reopens");
+    let retried = reopened.upgrade_table_with_context::<NoteV1, Note, NoteContext, Infallible, _>(
+        store.descriptor_v2(),
+        context,
+        convert,
+    );
+    assert!(matches!(retried, UpgradeOutcome::Upgraded(_)));
 }

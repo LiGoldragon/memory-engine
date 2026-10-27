@@ -10,9 +10,9 @@
 use rkyv::api::high::HighDeserializer;
 use rkyv::bytecheck::CheckBytes;
 use rkyv::rancor::{self, Strategy};
-use rkyv::validation::Validator;
 use rkyv::validation::archive::ArchiveValidator;
 use rkyv::validation::shared::SharedValidator;
+use rkyv::validation::Validator;
 
 use crate::catalog::FamilyRegistration;
 use crate::{
@@ -55,6 +55,34 @@ pub trait MemoryUpgrades {
     /// Interrupt the next upgrade's durable write at `fault`, as a crash
     /// there would.
     fn interrupt_upgrade_at(&self, fault: UpgradeFault);
+
+    /// Upgrade one family with a read-only typed context family. Both
+    /// families are read in one storage snapshot before any conversion or
+    /// write; the converted rows and current family marker then land by the
+    /// same atomic family evolution as an ordinary upgrade.
+    fn upgrade_table_with_context<Predecessor, Current, Context, Refusal, Convert>(
+        &mut self,
+        descriptor: TableDescriptor<Current>,
+        context: TableReference<Context>,
+        convert: Convert,
+    ) -> UpgradeOutcome<Current, Refusal>
+    where
+        Predecessor: MemoryDefinition + EngineStoredValue + Send + Sync + 'static,
+        <Predecessor as rkyv::Archive>::Archived: rkyv::Deserialize<Predecessor, HighDeserializer<rancor::Error>>
+            + for<'validation> CheckBytes<
+                Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+            >,
+        Current: UpgradeFrom<Predecessor> + EngineStoredValue + Send + Sync + 'static,
+        <Current as rkyv::Archive>::Archived: rkyv::Deserialize<Current, HighDeserializer<rancor::Error>>
+            + for<'validation> CheckBytes<
+                Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+            >,
+        Context: EngineStoredValue + Send + Sync + 'static,
+        <Context as rkyv::Archive>::Archived: rkyv::Deserialize<Context, HighDeserializer<rancor::Error>>
+            + for<'validation> CheckBytes<
+                Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+            >,
+        Convert: Fn(Predecessor, &[(String, Context)]) -> Decision<Current, Refusal>;
 }
 
 impl MemoryUpgrades for Engine {
@@ -146,6 +174,98 @@ impl MemoryUpgrades for Engine {
             .upgrade_fault
             .lock()
             .expect("upgrade fault lock poisoned") = Some(fault);
+    }
+
+    fn upgrade_table_with_context<Predecessor, Current, Context, Refusal, Convert>(
+        &mut self,
+        descriptor: TableDescriptor<Current>,
+        context: TableReference<Context>,
+        convert: Convert,
+    ) -> UpgradeOutcome<Current, Refusal>
+    where
+        Predecessor: MemoryDefinition + EngineStoredValue + Send + Sync + 'static,
+        <Predecessor as rkyv::Archive>::Archived: rkyv::Deserialize<Predecessor, HighDeserializer<rancor::Error>>
+            + for<'validation> CheckBytes<
+                Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+            >,
+        Current: UpgradeFrom<Predecessor> + EngineStoredValue + Send + Sync + 'static,
+        <Current as rkyv::Archive>::Archived: rkyv::Deserialize<Current, HighDeserializer<rancor::Error>>
+            + for<'validation> CheckBytes<
+                Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+            >,
+        Context: EngineStoredValue + Send + Sync + 'static,
+        <Context as rkyv::Archive>::Archived: rkyv::Deserialize<Context, HighDeserializer<rancor::Error>>
+            + for<'validation> CheckBytes<
+                Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+            >,
+        Convert: Fn(Predecessor, &[(String, Context)]) -> Decision<Current, Refusal>,
+    {
+        let failed = |phase, error| UpgradeOutcome::Failed(StorageFailure::new(phase, error));
+        let edge = match Self::admitted_edge::<Predecessor, Current>(&descriptor) {
+            Ok(edge) => edge,
+            Err(error) => return failed(StoragePhase::Admission, error),
+        };
+        let name = *descriptor.name();
+        let stored = match self.family_registration_state(&descriptor.family_identity()) {
+            Ok(FamilyRegistration::Existing) => {
+                return UpgradeOutcome::AlreadyCurrent(TableReference::new(name))
+            }
+            Ok(FamilyRegistration::New(_)) => {
+                return match self.register_table(descriptor) {
+                    Ok(table) => UpgradeOutcome::AlreadyCurrent(table),
+                    Err(error) => failed(StoragePhase::Commit, error),
+                }
+            }
+            Err(mismatch @ Error::FamilyIdentityMismatch { .. }) => {
+                match self.registered_family(&name) {
+                    Ok(stored) if descriptor.edge_from(&stored) == Some(edge) => stored,
+                    Ok(_) => return failed(StoragePhase::Admission, mismatch),
+                    Err(error) => return failed(StoragePhase::Admission, error),
+                }
+            }
+            Err(error) => return failed(StoragePhase::Admission, error),
+        };
+        let read = self.storage.read(|transaction| {
+            Ok((
+                sema::Table::<String, Predecessor>::new(name.as_str()).iter(transaction)?,
+                context.sema_table().iter(transaction)?,
+            ))
+        });
+        let (predecessors, context_rows) = match read {
+            Ok(rows) => rows,
+            Err(error) => return failed(StoragePhase::Read, error.into()),
+        };
+        let mut carried = Vec::with_capacity(predecessors.len());
+        for (key, predecessor) in predecessors {
+            match convert(predecessor, &context_rows) {
+                Decision::Ready(current) => carried.push((key, current)),
+                Decision::Refused(reason) => {
+                    return UpgradeOutcome::Refused(UpgradeRefusal::new(
+                        RecordKey::new(key),
+                        reason,
+                    ))
+                }
+            }
+        }
+        let previous = TableRegistration::new(stored.clone());
+        let upgraded = TableRegistration::new(descriptor.family_identity());
+        if let Err(error) = self.catalog.evolve(name.as_str(), upgraded.clone()) {
+            return failed(StoragePhase::Admission, error);
+        }
+        match self.persist_family_evolution(&descriptor, &stored, &carried, &upgraded) {
+            Ok(commit_sequence) => UpgradeOutcome::Upgraded(UpgradeReceipt::new(
+                TableReference::new(name),
+                edge,
+                carried.len(),
+                commit_sequence,
+            )),
+            Err(error) => {
+                if let Err(restore) = self.catalog.evolve(name.as_str(), previous) {
+                    return failed(StoragePhase::Commit, restore);
+                }
+                failed(StoragePhase::Commit, error)
+            }
+        }
     }
 }
 
