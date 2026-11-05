@@ -436,13 +436,16 @@ impl Engine {
             Ok(())
         })?;
 
-        Ok(IdentifiedMutationReceipt::new(
+        let receipt = IdentifiedMutationReceipt::new(
             SemaOperation::Assert,
             *assertion.table().name(),
             identifier,
             commit_sequence,
             snapshot,
-        ))
+        );
+        drop(_write_guard);
+        self.maintain_versioned_history()?;
+        Ok(receipt)
     }
 
     pub fn retract_identified<RecordValue>(
@@ -523,13 +526,16 @@ impl Engine {
             );
         }
 
-        Ok(IdentifiedMutationReceipt::new(
+        let receipt = IdentifiedMutationReceipt::new(
             SemaOperation::Retract,
             *retraction.table().name(),
             retraction.identifier(),
             commit_sequence,
             snapshot,
-        ))
+        );
+        drop(_write_guard);
+        self.maintain_versioned_history()?;
+        Ok(receipt)
     }
 
     pub fn mutate_identified<RecordValue>(
@@ -599,13 +605,16 @@ impl Engine {
             Ok(())
         })?;
 
-        Ok(IdentifiedMutationReceipt::new(
+        let receipt = IdentifiedMutationReceipt::new(
             SemaOperation::Mutate,
             *mutation.table().name(),
             mutation.identifier(),
             commit_sequence,
             snapshot,
-        ))
+        );
+        drop(_write_guard);
+        self.maintain_versioned_history()?;
+        Ok(receipt)
     }
 
     pub fn assert<RecordValue>(

@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 
 use memory_engine::{
-    Assertion, CompactionFault, Engine, EngineOpen, EngineRecord, FamilyName, Mutation, QueryPlan,
+    Assertion, CompactionFault, Engine, EngineOpen, EngineRecord, FamilyName, IdentifiedAssertion,
+    IdentifiedMutation, IdentifiedRetraction, IdentifiedTableDescriptor, Mutation, QueryPlan,
     RecordKey, Retraction, SchemaHash, SchemaVersion, TableDescriptor, TableName,
     VersionedHistoryAcknowledgement, VersionedHistoryRetention, VersionedRecoveryTopology,
     VersionedStoreName, VersioningPolicy,
@@ -33,6 +34,12 @@ impl EngineRecord for Thought {
     fn record_key(&self) -> RecordKey {
         RecordKey::new(self.key.clone())
     }
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+#[rkyv(derive(Debug))]
+struct Tally {
+    note: String,
 }
 
 struct Fixture {
@@ -85,6 +92,49 @@ impl Fixture {
             SchemaHash::for_label("thought-v1"),
         )
     }
+
+    fn tally_table(&self) -> IdentifiedTableDescriptor<Tally> {
+        IdentifiedTableDescriptor::new(
+            TableName::new("tallies"),
+            FamilyName::new("tally"),
+            SchemaHash::for_label("tally-v1"),
+        )
+    }
+}
+
+#[test]
+fn identified_writes_enforce_configured_history_retention() {
+    let fixture = Fixture::new();
+    let mut engine = fixture.open_zero_retention();
+    let table = engine
+        .register_identified_table(fixture.tally_table())
+        .expect("identified table registers");
+
+    let tally = engine
+        .assert_identified(IdentifiedAssertion::new(
+            table,
+            Tally {
+                note: "first".to_owned(),
+            },
+        ))
+        .expect("identified assert");
+    assert!(engine.versioned_commit_log().expect("log reads").is_empty());
+
+    engine
+        .mutate_identified(IdentifiedMutation::new(
+            table,
+            tally.identifier(),
+            Tally {
+                note: "revised".to_owned(),
+            },
+        ))
+        .expect("identified mutate");
+    assert!(engine.versioned_commit_log().expect("log reads").is_empty());
+
+    engine
+        .retract_identified(IdentifiedRetraction::new(table, tally.identifier()))
+        .expect("identified retract");
+    assert!(engine.versioned_commit_log().expect("log reads").is_empty());
 }
 
 #[test]
