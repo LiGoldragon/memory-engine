@@ -19,24 +19,23 @@ sections that follow realize it.
 - `memory-engine` is the exclusive database-operation boundary for
   state-bearing components: no component daemon makes direct redb calls,
   defines redb tables, runs redb transactions, or maintains its own
-  database commit ledger. Per Spirit fosp (Correction): Memory-engine is
+  database commit ledger. [The Nexus vision](https://github.com/LiGoldragon/psyche-belief/blob/main/vision/nexus.md) supports Memory being reached through the engine; the cited source identifier `fosp` is unresolved. Memory-engine is
   the exclusive interface to the database; no component daemon may make
   direct redb calls.
 - The versioned operation log is the authoritative source of truth for
   component Memory state, and the redb store is a rebuildable materialized
-  view folded from the log. Per Spirit iir4 (Decision). Durable writes
+  view folded from the log. The cited source identifier `iir4` is unresolved. Durable writes
   go through logged choke points; components receive a read-only
   `StorageReader` with no write affordance, so the log stays complete by
   construction.
 - blake3 is the content-addressing primitive throughout: family schema
   hashes, the derived store-level schema hash, segment addresses, and
-  the versioned-entry digest chain. Per Spirit x0ja (Constraint).
+  the versioned-entry digest chain. The cited source identifier `x0ja` is unresolved.
 - Native version control is one reusable library and state loss is
   unacceptable. Components configure a `VersioningPolicy` once rather
   than reimplementing component-local durability journals, and every
   versioned entry lands with a durable mirror outbox row in the same
-  write transaction at every choke point. Per Spirit 29pb / j487; per
-  Spirit 29pb: atomic server-backed durability, state loss unacceptable.
+  write transaction at every choke point. The cited source identifiers `29pb` and `j487` are unresolved; their stated direction is retained here.
 - The engine surface follows the architecture of its users rather than
   forcing components to build compatibility shims. When an ethos-derived
   component exposes a reusable storage need, the answer is to improve
@@ -48,16 +47,16 @@ sections that follow realize it.
   consumer, build the durable database backing (live-generation set,
   GC roots, event log persisted with self-resume) before any
   in-memory shortcut, so the on-disk log is authoritative from the
-  start rather than retrofitted. Per Spirit fosp.
+  start rather than retrofitted. The cited source identifier `fosp` is unresolved.
 - The [ethos] component holds the compiled binary runtime [ethos] (O(1)
   lookup, version-diff and namespace tables); NOTA is the source
-  authoring format, not the runtime shape. Per Spirit fosp.
+  authoring format, not the runtime shape. The cited source identifier `fosp` is unresolved.
 - Every path that introduces entries to a versioned branch routes
   through one reusable `IntakePolicy` admission interface, with
   per-component implementations. `IntakePolicy` is not only a rebase
   hook: assert, mutate, retract, replay, import, and any future
   entry-introducing path admit through it unless a later design
-  explicitly supersedes this. Per Spirit 2uhh. (`IntakePolicy` is the
+  explicitly supersedes this. The cited source identifier `2uhh` is unresolved. (`IntakePolicy` is the
   admission half of the versioning library; `VersioningPolicy` names
   the store and schema identity. The admission interface is accepted
   direction; the concrete trait is not yet built.)
@@ -66,7 +65,7 @@ sections that follow realize it.
   database must become much larger and independently available. It is
   not the current design — the engine is a per-plane library linked
   into each component daemon — and it should not be emphasized in a way
-  that suggests an imminent split. Per Spirit en7k.
+  that suggests an imminent split. [The Nexus vision](https://github.com/LiGoldragon/psyche-belief/blob/main/vision/nexus.md) discusses splitting Nexuses; the cited source identifier `en7k` is unresolved.
 
 ## Constraints
 
@@ -209,7 +208,7 @@ sections that follow realize it.
   request-root tags, as an `AuthorizedSignalVerb` enum, or as a
   payloadless `SemaObservation` event in any signal or meta-signal
   contract. Legacy contracts that still carry the classification on the
-  wire need a cleanup pass. Per Spirit 7l7l.
+  wire need a cleanup pass. The cited source identifier `7l7l` is unresolved.
 - Unsupported read-plan operators return typed `UnsupportedReadPlan` errors
   instead of pretending execution succeeded.
 - `Filter` executes. Its predicate is a typed `RecordPredicate` the
@@ -298,7 +297,7 @@ sections that follow realize it.
   mutation. A durable write reply reports the persistence outcome: once
   the commit succeeds the caller sees a committed write, and any
   post-commit subscription fanout failure is observed separately rather
-  than turning a committed write into a rejected one. Per Spirit y3ag.
+  than turning a committed write into a rejected one. [The Nexus vision](https://github.com/LiGoldragon/psyche-belief/blob/main/vision/nexus.md) states that state changes arrive as subscription events; the cited source identifier `y3ag` is unresolved.
 - Subscription sinks choose detached or inline delivery. Detached is the
   default for blocking sinks; inline exists for actor enqueue sinks that need
   deterministic post-commit ordering without polling.
@@ -337,7 +336,7 @@ signal verbs. The two headers (signal-header and memory-header) use the
 same macro machinery but route to different paths. Tap-anywhere
 observability therefore extends to memory-side operations identically to
 the signal side: a tap can read the header at any engine operation
-without decoding the payload. Per Spirit duis. (Accepted direction;
+without decoding the payload. The cited source identifier `duis` is unresolved. (Accepted direction;
 the memory-header type is not yet emitted.)
 
 ## Current Surface
