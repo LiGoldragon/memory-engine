@@ -220,6 +220,33 @@ fn table_rename_with_same_family_replays_into_current_table() {
 }
 
 #[test]
+fn versioned_replay_rejects_an_unknown_family() {
+    let fixture = Fixture::new();
+    let entries = {
+        let mut source = fixture.open_versioned("unknown-family-source");
+        let activities = source
+            .register_table(fixture.activity_descriptor())
+            .expect("activity table registers");
+        source
+            .assert(Assertion::new(activities, Activity::new("a-1", "noise")))
+            .expect("activity asserts");
+        source.versioned_commit_log().expect("versioned log reads")
+    };
+
+    let target = fixture.open_versioned("unknown-family-target");
+    let activity_coordinate =
+        memory_engine::TableReference::<Activity>::new(TableName::new("activities"));
+    let error = target
+        .replay_versioned(VersionedReplay::new(activity_coordinate, entries))
+        .expect_err("unknown family is rejected");
+
+    assert!(matches!(
+        error,
+        memory_engine::Error::TableNotRegistered { .. }
+    ));
+}
+
+#[test]
 fn store_schema_hash_derives_from_family_inventory_not_table_names() {
     let fixture = Fixture::new();
 

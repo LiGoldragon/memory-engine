@@ -1492,8 +1492,28 @@ impl Engine {
                 Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
             >,
     {
-        self.ensure_registered(replay.table())?;
-        let registered = self.registered_family(replay.table().name())?;
+        // The table coordinate in a replay request is the current coordinate
+        // supplied by the caller.  Log entries retain the coordinate at which
+        // they were written, so registration must be matched by the stable
+        // family identity rather than by the historical table name.
+        let registered = self
+            .catalog
+            .family_identity(replay.table().name())
+            .cloned()
+            .or_else(|| {
+                replay
+                    .entries()
+                    .iter()
+                    .flat_map(|entry| entry.operations())
+                    .find_map(|operation| {
+                        self.catalog
+                            .registration_for_family(operation.family())
+                            .map(|registration| registration.identity().clone())
+                    })
+            })
+            .ok_or_else(|| Error::TableNotRegistered {
+                table: replay.table().name().as_str().to_owned(),
+            })?;
         let mut applied = 0;
         let mut skipped = 0;
         for entry in replay.entries() {
