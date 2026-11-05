@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
@@ -168,6 +169,50 @@ struct BlockingDeltaSink {
     release: Mutex<Receiver<()>>,
 }
 
+struct EstablishmentRaceSink {
+    engine: Arc<Engine>,
+    table: memory_engine::TableReference<SubscribedRecord>,
+    started: Sender<()>,
+    started_receiver: Mutex<Receiver<()>>,
+    completed: Arc<AtomicBool>,
+    completed_during_initial: Arc<AtomicBool>,
+    events: Mutex<Vec<SubscriptionEvent<SubscribedRecord>>>,
+}
+
+impl SubscriptionSink<SubscribedRecord> for EstablishmentRaceSink {
+    fn deliver(&self, event: SubscriptionEvent<SubscribedRecord>) -> Result<(), SinkError> {
+        self.events
+            .lock()
+            .expect("race events lock")
+            .push(event.clone());
+        if matches!(event, SubscriptionEvent::InitialSnapshot(_)) {
+            let engine = Arc::clone(&self.engine);
+            let table = self.table;
+            let started = self.started.clone();
+            let completed = Arc::clone(&self.completed);
+            std::thread::spawn(move || {
+                started.send(()).expect("writer starts");
+                engine
+                    .assert(Assertion::new(
+                        table,
+                        SubscribedRecord::new("racing", "write"),
+                    ))
+                    .expect("racing write succeeds");
+                completed.store(true, Ordering::Release);
+            });
+            self.started_receiver
+                .lock()
+                .expect("started receiver lock")
+                .recv_timeout(Duration::from_secs(2))
+                .expect("writer reaches the race boundary");
+            std::thread::sleep(Duration::from_millis(50));
+            self.completed_during_initial
+                .store(self.completed.load(Ordering::Acquire), Ordering::Release);
+        }
+        Ok(())
+    }
+}
+
 impl BlockingDeltaSink {
     fn new(entered: Sender<()>, release: Receiver<()>) -> Self {
         Self {
@@ -237,6 +282,49 @@ fn subscribe_initial_snapshot_uses_latest_committed_snapshot() {
         SubscriptionEvent::InitialSnapshot(initial)
             if initial.snapshot().snapshot() == SnapshotIdentifier::new(2)
     ));
+}
+
+#[test]
+fn subscription_establishment_covers_a_racing_write_once() {
+    let fixture = SubscriptionFixture::new();
+    let mut engine = fixture.open_engine();
+    let records = engine
+        .register_table(fixture.descriptor())
+        .expect("table registers");
+    let engine = Arc::new(engine);
+    let (started_sender, started_receiver) = mpsc::channel();
+    let completed = Arc::new(AtomicBool::new(false));
+    let completed_during_initial = Arc::new(AtomicBool::new(false));
+    let sink = Arc::new(EstablishmentRaceSink {
+        engine: Arc::clone(&engine),
+        table: records,
+        started: started_sender,
+        started_receiver: Mutex::new(started_receiver),
+        completed: Arc::clone(&completed),
+        completed_during_initial: Arc::clone(&completed_during_initial),
+        events: Mutex::new(Vec::new()),
+    });
+
+    let receipt = engine
+        .subscribe(QueryPlan::all(records), sink.clone())
+        .expect("subscription succeeds");
+    for _ in 0..200 {
+        if completed.load(Ordering::Acquire) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(completed.load(Ordering::Acquire), "racing write completes");
+    assert!(!completed_during_initial.load(Ordering::Acquire));
+    let events = sink.events.lock().expect("race events lock");
+    assert_eq!(receipt.initial().snapshot().records().len(), 0);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, SubscriptionEvent::Delta(_)))
+            .count(),
+        1
+    );
 }
 
 #[test]

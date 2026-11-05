@@ -1409,6 +1409,10 @@ impl Engine {
                 operator: crate::ReadOperator::Filter,
             });
         }
+        // Snapshot, durable registration, and active fanout membership form
+        // one establishment boundary. A writer must not commit between them,
+        // or its matching delta can fall into the gap and be lost.
+        let _write_guard = self.write_guard();
         let snapshot = self.match_records(plan.clone())?;
         let handle = self.next_subscription_handle(&plan, snapshot.snapshot())?;
         let initial = InitialSnapshot::new(handle, snapshot);
