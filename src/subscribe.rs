@@ -332,6 +332,7 @@ impl SequenceRange {
 pub(crate) struct SubscriptionRegistry {
     entries: Mutex<Vec<Arc<dyn ErasedSubscription>>>,
     failures: SubscriptionFailureRecorder,
+    remove_fault: Mutex<bool>,
 }
 
 impl SubscriptionRegistry {
@@ -339,6 +340,7 @@ impl SubscriptionRegistry {
         Self {
             entries: Mutex::new(Vec::new()),
             failures: SubscriptionFailureRecorder::new(),
+            remove_fault: Mutex::new(false),
         }
     }
 
@@ -398,7 +400,27 @@ impl SubscriptionRegistry {
             .lock()
             .map_err(|_| crate::Error::SubscriptionRegistryPoisoned)?;
         entries.retain(|entry| entry.handle() != handle);
+        let remove_fault = {
+            let mut fault = self
+                .remove_fault
+                .lock()
+                .map_err(|_| crate::Error::SubscriptionRegistryPoisoned)?;
+            let active = *fault;
+            *fault = false;
+            active
+        };
+        if remove_fault {
+            return Err(crate::Error::SubscriptionRegistryCleanup {
+                message: "injected registry cleanup failure".to_owned(),
+            });
+        }
         Ok(())
+    }
+
+    pub(crate) fn inject_remove_failure(&self) {
+        if let Ok(mut fault) = self.remove_fault.lock() {
+            *fault = true;
+        }
     }
 
     pub(crate) fn deliver_delta<RecordValue>(

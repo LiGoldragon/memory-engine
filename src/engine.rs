@@ -112,6 +112,7 @@ pub struct Engine {
     compaction_fault: std::sync::Mutex<Option<CompactionFault>>,
     /// Test-only interruption of the next upgrade's durable write.
     pub(crate) upgrade_fault: std::sync::Mutex<Option<crate::UpgradeFault>>,
+    subscription_durable_cleanup_fault: std::sync::Mutex<bool>,
 }
 
 impl Engine {
@@ -189,6 +190,7 @@ impl Engine {
             staging: std::sync::Mutex::new(None),
             compaction_fault: std::sync::Mutex::new(None),
             upgrade_fault: std::sync::Mutex::new(None),
+            subscription_durable_cleanup_fault: std::sync::Mutex::new(false),
         })
     }
 
@@ -1429,12 +1431,10 @@ impl Engine {
             let failure = Error::SubscriptionSink {
                 message: error.message().to_owned(),
             };
-            let _ = self.abort_subscription(handle);
-            return Err(failure);
+            return Err(self.abort_subscription(handle, failure));
         }
         if let Err(error) = self.subscriptions.activate(handle) {
-            let _ = self.abort_subscription(handle);
-            return Err(error);
+            return Err(self.abort_subscription(handle, error));
         }
         Ok(SubscriptionReceipt::new(handle, initial))
     }
@@ -1450,6 +1450,16 @@ impl Engine {
             .into_iter()
             .map(|(_key, registration)| registration)
             .collect())
+    }
+
+    pub fn inject_subscription_registry_cleanup_failure(&self) {
+        self.subscriptions.inject_remove_failure();
+    }
+
+    pub fn inject_subscription_durable_cleanup_failure(&self) {
+        if let Ok(mut fault) = self.subscription_durable_cleanup_fault.lock() {
+            *fault = true;
+        }
     }
 
     pub fn list_tables(&self) -> Vec<TableRegistration> {
@@ -3567,13 +3577,37 @@ impl Engine {
         Ok(())
     }
 
-    fn abort_subscription(&self, handle: SubscriptionHandle) -> Result<()> {
-        self.subscriptions.remove(handle)?;
-        self.storage.write(|transaction| {
-            SUBSCRIPTIONS.remove(transaction, handle.id().value())?;
-            Ok(())
-        })?;
-        Ok(())
+    fn abort_subscription(&self, handle: SubscriptionHandle, original: Error) -> Error {
+        let registry = self.subscriptions.remove(handle).err().map(Box::new);
+        let durable_result: Result<()> = self
+            .storage
+            .write(|transaction| {
+                SUBSCRIPTIONS.remove(transaction, handle.id().value())?;
+                Ok(())
+            })
+            .map_err(Into::into);
+        let durable = match durable_result {
+            Err(error) => Some(Box::new(error)),
+            Ok(()) => self
+                .subscription_durable_cleanup_fault
+                .lock()
+                .ok()
+                .and_then(|mut fault| {
+                    let active = *fault;
+                    *fault = false;
+                    active.then_some(Box::new(Error::SubscriptionDurableCleanup {
+                        message: "injected durable cleanup failure".to_owned(),
+                    }))
+                }),
+        };
+        match (registry, durable) {
+            (None, None) => original,
+            (registry, durable) => Error::SubscriptionCleanup {
+                original: Box::new(original),
+                registry,
+                durable,
+            },
+        }
     }
 
     pub(crate) fn versioned_record_entry<RecordValue>(

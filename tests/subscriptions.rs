@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use memory_engine::{
-    Assertion, CommitRequest, CommitSequence, DeltaKind, Engine, EngineOpen, EngineRecord,
+    Assertion, CommitRequest, CommitSequence, DeltaKind, Engine, EngineOpen, EngineRecord, Error,
     FamilyName, Mutation, QueryPlan, RecordKey, Retraction, SchemaHash, SchemaVersion,
     SequenceRange, SinkError, SnapshotIdentifier, SubscriptionDeliveryMode, SubscriptionEvent,
     SubscriptionFanoutFailure, SubscriptionSink, TableDescriptor, TableName,
@@ -358,6 +358,71 @@ fn failed_initial_delivery_aborts_registration() {
             Arc::new(InlineRecordEventLog::new()),
         )
         .expect("resubscription succeeds");
+}
+
+#[test]
+fn failed_initial_delivery_reports_registry_cleanup_failure() {
+    let fixture = SubscriptionFixture::new();
+    let mut engine = fixture.open_engine();
+    let records = engine
+        .register_table(fixture.descriptor())
+        .expect("table registers");
+    engine.inject_subscription_registry_cleanup_failure();
+
+    let error = engine
+        .subscribe(QueryPlan::all(records), Arc::new(InitialFailingSink))
+        .expect_err("initial delivery fails");
+    match error {
+        Error::SubscriptionCleanup {
+            original,
+            registry: Some(registry),
+            durable: None,
+        } => {
+            assert!(matches!(*original, Error::SubscriptionSink { .. }));
+            assert!(matches!(
+                *registry,
+                Error::SubscriptionRegistryCleanup { .. }
+            ));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    assert!(
+        engine
+            .subscription_registrations()
+            .expect("registrations read")
+            .is_empty()
+    );
+}
+
+#[test]
+fn failed_initial_delivery_reports_durable_cleanup_failure() {
+    let fixture = SubscriptionFixture::new();
+    let mut engine = fixture.open_engine();
+    let records = engine
+        .register_table(fixture.descriptor())
+        .expect("table registers");
+    engine.inject_subscription_durable_cleanup_failure();
+
+    let error = engine
+        .subscribe(QueryPlan::all(records), Arc::new(InitialFailingSink))
+        .expect_err("initial delivery fails");
+    match error {
+        Error::SubscriptionCleanup {
+            original,
+            registry: None,
+            durable: Some(durable),
+        } => {
+            assert!(matches!(*original, Error::SubscriptionSink { .. }));
+            assert!(matches!(*durable, Error::SubscriptionDurableCleanup { .. }));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    assert!(
+        engine
+            .subscription_registrations()
+            .expect("registrations read")
+            .is_empty()
+    );
 }
 
 #[test]

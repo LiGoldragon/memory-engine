@@ -309,6 +309,21 @@ pub enum Error {
     #[error("subscription sink failed before registration: {message}")]
     SubscriptionSink { message: String },
 
+    #[error("subscription registry cleanup failed: {message}")]
+    SubscriptionRegistryCleanup { message: String },
+
+    #[error("subscription durable cleanup failed: {message}")]
+    SubscriptionDurableCleanup { message: String },
+
+    #[error(
+        "subscription establishment failed: {original}; cleanup failures: registry={registry:?}, durable={durable:?}"
+    )]
+    SubscriptionCleanup {
+        original: Box<Error>,
+        registry: Option<Box<Error>>,
+        durable: Option<Box<Error>>,
+    },
+
     #[error("read plan operator is not implemented yet: {operator:?}")]
     UnsupportedReadPlan { operator: crate::ReadOperator },
 }
