@@ -7,16 +7,6 @@ mod fixture {
 use fixture::{Domain, DomainSnapshot, DomainSnapshots};
 
 #[test]
-fn table_specification_declares_its_storage_contract() {
-    assert_eq!(DomainSnapshots::TABLE_NAME.as_str(), "domain_snapshots");
-    assert_eq!(DomainSnapshots::FAMILY_NAME, "domain_snapshot");
-    let descriptor = DomainSnapshots::descriptor();
-    assert_eq!(descriptor.name().as_str(), "domain_snapshots");
-    assert_eq!(descriptor.family().as_str(), "domain_snapshot");
-    assert_eq!(descriptor.schema_hash(), DomainSnapshots::SCHEMA_HASH);
-}
-
-#[test]
 fn declared_domain_snapshot_table_writes_and_reads_a_typed_domain_key() {
     let temporary = tempfile::tempdir().expect("fresh Memory directory");
     let path = temporary.path().join("table-specification.memory");

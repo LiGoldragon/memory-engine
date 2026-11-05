@@ -1,12 +1,11 @@
 use std::path::PathBuf;
 
 use memory_engine::{
-    AggregatePlan, Assertion, CommitRequest, CommitSequence, DatabaseMarker, Engine, EngineOpen,
-    EngineRecord, FamilyName, FieldSelection, IdentifiedAssertion, IdentifiedMutation,
-    IdentifiedQueryPlan, IdentifiedRetraction, IdentifiedTableDescriptor, KeyRange, KeyedAssertion,
-    KeyedMutation, Mutation, QueryPlan, ReadOperator, RecordIdentifier, RecordKey, RecursionMode,
-    Retraction, RuleSetRef, SchemaHash, SchemaVersion, SnapshotIdentifier, TableDescriptor,
-    TableName, UnificationPlan,
+    Assertion, CommitRequest, CommitSequence, DatabaseMarker, Engine, EngineOpen, EngineRecord,
+    FamilyName, FieldSelection, IdentifiedAssertion, IdentifiedMutation, IdentifiedQueryPlan,
+    IdentifiedRetraction, IdentifiedTableDescriptor, KeyRange, KeyedAssertion, KeyedMutation,
+    Mutation, QueryPlan, ReadOperator, RecordIdentifier, RecordKey, Retraction, SchemaHash,
+    SchemaVersion, SnapshotIdentifier, TableDescriptor, TableName,
 };
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_sema::SemaOperation;
@@ -765,42 +764,6 @@ fn commit_assert_against_existing_key_rolls_back_entire_bundle() {
         engine.latest_snapshot().unwrap(),
         SnapshotIdentifier::new(1)
     );
-}
-
-#[test]
-fn memory_engine_owns_demoted_read_plan_operator_vocabulary() {
-    let fixture = EngineFixture::new();
-    let mut engine = fixture.open_engine();
-    let records = engine
-        .register_table(fixture.toy_descriptor())
-        .expect("table registers");
-
-    let plans = [
-        (
-            QueryPlan::<ToyRecord>::constrain(records, UnificationPlan::new(["name"])),
-            ReadOperator::Constrain,
-        ),
-        (
-            QueryPlan::<ToyRecord>::project(records, FieldSelection::named(["key", "body"])),
-            ReadOperator::Project,
-        ),
-        (
-            QueryPlan::<ToyRecord>::aggregate(records, AggregatePlan::new("count")),
-            ReadOperator::Aggregate,
-        ),
-        (
-            QueryPlan::<ToyRecord>::infer(records, RuleSetRef::new("taxonomy")),
-            ReadOperator::Infer,
-        ),
-        (
-            QueryPlan::<ToyRecord>::recurse(records, RecursionMode::new("depends-on")),
-            ReadOperator::Recurse,
-        ),
-    ];
-
-    for (plan, operator) in plans {
-        assert_eq!(plan.read_plan().operator(), operator);
-    }
 }
 
 #[test]

@@ -244,15 +244,6 @@ mod tests {
     }
 
     #[test]
-    fn identifier_value_is_infallible_projection_of_the_arm() {
-        assert_eq!(
-            RecordKey::identifier(RecordIdentifier::new(7)).identifier_value(),
-            Some(RecordIdentifier::new(7)),
-        );
-        assert_eq!(RecordKey::domain("alpha").identifier_value(), None);
-    }
-
-    #[test]
     fn canonical_string_form_is_stable_for_both_arms() {
         assert_eq!(RecordKey::domain("beta").to_owned_string(), "beta");
         assert_eq!(

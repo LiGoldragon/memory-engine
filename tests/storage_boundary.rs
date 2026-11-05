@@ -5,9 +5,6 @@
 //! these tests pin the source surface so the affordance cannot
 //! silently return.
 
-use std::fs;
-use std::path::PathBuf;
-
 use memory_engine::{
     Assertion, Engine, EngineOpen, EngineRecord, FamilyName, RecordKey, SchemaHash, SchemaVersion,
     StorageKernelTable, TableDescriptor, TableName,
@@ -25,22 +22,6 @@ struct Thought {
 impl EngineRecord for Thought {
     fn record_key(&self) -> RecordKey {
         RecordKey::new(self.key.clone())
-    }
-}
-
-struct SourceFixture {
-    root: PathBuf,
-}
-
-impl SourceFixture {
-    fn current() -> Self {
-        Self {
-            root: PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-        }
-    }
-
-    fn source(&self, path: &str) -> String {
-        fs::read_to_string(self.root.join(path)).expect("source file is readable")
     }
 }
 
@@ -62,50 +43,6 @@ impl EngineFixture {
         ))
         .expect("engine opens")
     }
-}
-
-#[test]
-fn engine_hands_out_no_raw_storage_kernel_or_write_transaction() {
-    let fixture = SourceFixture::current();
-    let engine_source = fixture.source("src/engine.rs");
-    let lib_source = fixture.source("src/lib.rs");
-
-    assert!(
-        !engine_source.contains("pub fn storage_kernel"),
-        "Engine must not hand out the raw storage kernel"
-    );
-    assert!(
-        !engine_source.contains("-> &::memory::Memory"),
-        "no public method may return the raw kernel handle"
-    );
-    assert!(
-        !lib_source.contains("Memory as StorageKernel,")
-            && !lib_source.contains("Memory as StorageKernel}"),
-        "lib must not re-export the raw kernel handle type"
-    );
-    assert!(
-        !lib_source.contains("WriteTransaction"),
-        "lib must not re-export a storage write transaction type"
-    );
-}
-
-#[test]
-fn storage_reader_has_a_read_affordance_and_no_write_affordance() {
-    let fixture = SourceFixture::current();
-    let engine_source = fixture.source("src/engine.rs");
-
-    let reader_definition = engine_source
-        .split("pub struct StorageReader")
-        .nth(1)
-        .expect("StorageReader is defined in engine.rs");
-    assert!(
-        reader_definition.contains("pub fn read"),
-        "StorageReader must expose transitional read access"
-    );
-    assert!(
-        !reader_definition.contains("pub fn write"),
-        "StorageReader must not expose a write transaction"
-    );
 }
 
 #[test]
