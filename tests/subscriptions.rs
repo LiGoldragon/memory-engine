@@ -176,6 +176,7 @@ struct EstablishmentRaceSink {
     started_receiver: Mutex<Receiver<()>>,
     completed: Arc<AtomicBool>,
     events: Mutex<Vec<SubscriptionEvent<SubscribedRecord>>>,
+    fail_delta: bool,
 }
 
 impl SubscriptionSink<SubscribedRecord> for EstablishmentRaceSink {
@@ -206,11 +207,22 @@ impl SubscriptionSink<SubscribedRecord> for EstablishmentRaceSink {
                 .expect("writer reaches the race boundary");
             std::thread::sleep(Duration::from_millis(50));
         }
+        if self.fail_delta && matches!(event, SubscriptionEvent::Delta(_)) {
+            return Err(SinkError::new("drain failed"));
+        }
         Ok(())
     }
 
     fn delivery_mode(&self) -> SubscriptionDeliveryMode {
         SubscriptionDeliveryMode::Inline
+    }
+}
+
+struct InitialFailingSink;
+
+impl SubscriptionSink<SubscribedRecord> for InitialFailingSink {
+    fn deliver(&self, _event: SubscriptionEvent<SubscribedRecord>) -> Result<(), SinkError> {
+        Err(SinkError::new("initial failed"))
     }
 }
 
@@ -302,6 +314,7 @@ fn subscription_establishment_covers_a_racing_write_once() {
         started_receiver: Mutex::new(started_receiver),
         completed: Arc::clone(&completed),
         events: Mutex::new(Vec::new()),
+        fail_delta: false,
     });
 
     let receipt = engine
@@ -319,6 +332,72 @@ fn subscription_establishment_covers_a_racing_write_once() {
     assert_eq!(events.len(), 2);
     assert!(matches!(events[0], SubscriptionEvent::InitialSnapshot(_)));
     assert!(matches!(events[1], SubscriptionEvent::Delta(_)));
+}
+
+#[test]
+fn failed_initial_delivery_aborts_registration() {
+    let fixture = SubscriptionFixture::new();
+    let mut engine = fixture.open_engine();
+    let records = engine
+        .register_table(fixture.descriptor())
+        .expect("table registers");
+    assert!(
+        engine
+            .subscribe(QueryPlan::all(records), Arc::new(InitialFailingSink))
+            .is_err()
+    );
+    assert!(
+        engine
+            .subscription_registrations()
+            .expect("registrations read")
+            .is_empty()
+    );
+    engine
+        .subscribe(
+            QueryPlan::all(records),
+            Arc::new(InlineRecordEventLog::new()),
+        )
+        .expect("resubscription succeeds");
+}
+
+#[test]
+fn failed_pending_drain_aborts_registration_and_callbacks() {
+    let fixture = SubscriptionFixture::new();
+    let mut engine = fixture.open_engine();
+    let records = engine
+        .register_table(fixture.descriptor())
+        .expect("table registers");
+    let engine = Arc::new(engine);
+    let (started_sender, started_receiver) = mpsc::channel();
+    let completed = Arc::new(AtomicBool::new(false));
+    let failing = Arc::new(EstablishmentRaceSink {
+        engine: Arc::clone(&engine),
+        table: records,
+        started: started_sender,
+        started_receiver: Mutex::new(started_receiver),
+        completed: Arc::clone(&completed),
+        events: Mutex::new(Vec::new()),
+        fail_delta: true,
+    });
+    assert!(engine.subscribe(QueryPlan::all(records), failing).is_err());
+    assert!(completed.load(Ordering::Acquire));
+    assert!(
+        engine
+            .subscription_registrations()
+            .expect("registrations read")
+            .is_empty()
+    );
+    let healthy = Arc::new(InlineRecordEventLog::new());
+    engine
+        .subscribe(QueryPlan::all(records), healthy.clone())
+        .expect("resubscription succeeds");
+    engine
+        .assert(Assertion::new(
+            records,
+            SubscribedRecord::new("after", "ok"),
+        ))
+        .expect("later write succeeds");
+    assert_eq!(healthy.events().len(), 2);
 }
 
 #[test]

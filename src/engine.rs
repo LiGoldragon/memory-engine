@@ -1424,11 +1424,18 @@ impl Engine {
             self.subscriptions.failure_recorder(),
         ))?;
         drop(_write_guard);
-        sink.deliver(crate::SubscriptionEvent::InitialSnapshot(initial.clone()))
-            .map_err(|error| Error::SubscriptionSink {
+        if let Err(error) = sink.deliver(crate::SubscriptionEvent::InitialSnapshot(initial.clone()))
+        {
+            let failure = Error::SubscriptionSink {
                 message: error.message().to_owned(),
-            })?;
-        self.subscriptions.activate(handle)?;
+            };
+            let _ = self.abort_subscription(handle);
+            return Err(failure);
+        }
+        if let Err(error) = self.subscriptions.activate(handle) {
+            let _ = self.abort_subscription(handle);
+            return Err(error);
+        }
         Ok(SubscriptionReceipt::new(handle, initial))
     }
 
@@ -3555,6 +3562,15 @@ impl Engine {
                 NEXT_SUBSCRIPTION_KEY,
                 &handle.id().next().value(),
             )?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    fn abort_subscription(&self, handle: SubscriptionHandle) -> Result<()> {
+        self.subscriptions.remove(handle)?;
+        self.storage.write(|transaction| {
+            SUBSCRIPTIONS.remove(transaction, handle.id().value())?;
             Ok(())
         })?;
         Ok(())

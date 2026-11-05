@@ -383,8 +383,21 @@ impl SubscriptionRegistry {
             .find(|entry| entry.handle() == handle)
             .cloned();
         if let Some(entry) = entry {
-            entry.drain_pending();
+            if let Some(error) = entry.drain_pending() {
+                return Err(crate::Error::SubscriptionSink {
+                    message: error.message().to_owned(),
+                });
+            }
         }
+        Ok(())
+    }
+
+    pub(crate) fn remove(&self, handle: SubscriptionHandle) -> crate::Result<()> {
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| crate::Error::SubscriptionRegistryPoisoned)?;
+        entries.retain(|entry| entry.handle() != handle);
         Ok(())
     }
 
@@ -482,7 +495,7 @@ trait ErasedSubscription: Send + Sync {
         record: &dyn Any,
     );
 
-    fn drain_pending(&self);
+    fn drain_pending(&self) -> Option<SinkError>;
 }
 
 impl<RecordValue> ErasedSubscription for ActiveSubscription<RecordValue>
@@ -528,37 +541,42 @@ where
             return;
         }
         drop(lifecycle);
-        self.deliver_event(event);
+        if let Err(error) = self.deliver_event(event) {
+            self.failures
+                .record(SubscriptionFanoutFailure::sink(self.handle, error));
+        }
     }
 
-    fn drain_pending(&self) {
+    fn drain_pending(&self) -> Option<SinkError> {
         loop {
             let event = {
                 let Ok(mut lifecycle) = self.lifecycle.lock() else {
                     self.failures
                         .record(SubscriptionFanoutFailure::RegistryUnavailable);
-                    return;
+                    return None;
                 };
                 match &mut *lifecycle {
                     SubscriptionLifecycle::Pending(events) => events.pop_front(),
-                    SubscriptionLifecycle::Active => return,
+                    SubscriptionLifecycle::Active => return None,
                 }
             };
             let Some(event) = event else {
                 let Ok(mut lifecycle) = self.lifecycle.lock() else {
                     self.failures
                         .record(SubscriptionFanoutFailure::RegistryUnavailable);
-                    return;
+                    return None;
                 };
                 if let SubscriptionLifecycle::Pending(events) = &mut *lifecycle
                     && events.is_empty()
                 {
                     *lifecycle = SubscriptionLifecycle::Active;
-                    return;
+                    return None;
                 }
                 continue;
             };
-            self.deliver_event(event);
+            if let Err(error) = self.deliver_event(event) {
+                return Some(error);
+            }
         }
     }
 }
@@ -567,7 +585,7 @@ impl<RecordValue> ActiveSubscription<RecordValue>
 where
     RecordValue: Clone + Send + Sync + 'static,
 {
-    fn deliver_event(&self, event: SubscriptionEvent<RecordValue>) {
+    fn deliver_event(&self, event: SubscriptionEvent<RecordValue>) -> Result<(), SinkError> {
         match self.sink.delivery_mode() {
             SubscriptionDeliveryMode::Detached => {
                 let sink = Arc::clone(&self.sink);
@@ -578,13 +596,9 @@ where
                         failures.record(SubscriptionFanoutFailure::sink(handle, error));
                     }
                 }));
+                Ok(())
             }
-            SubscriptionDeliveryMode::Inline => {
-                if let Err(error) = self.sink.deliver(event) {
-                    self.failures
-                        .record(SubscriptionFanoutFailure::sink(self.handle, error));
-                }
-            }
+            SubscriptionDeliveryMode::Inline => self.sink.deliver(event),
         }
     }
 }
