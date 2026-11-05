@@ -382,12 +382,12 @@ impl SubscriptionRegistry {
             .iter()
             .find(|entry| entry.handle() == handle)
             .cloned();
-        if let Some(entry) = entry {
-            if let Some(error) = entry.drain_pending() {
-                return Err(crate::Error::SubscriptionSink {
-                    message: error.message().to_owned(),
-                });
-            }
+        if let Some(entry) = entry
+            && let Some(error) = entry.drain_pending()
+        {
+            return Err(crate::Error::SubscriptionSink {
+                message: error.message().to_owned(),
+            });
         }
         Ok(())
     }
