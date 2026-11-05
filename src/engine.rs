@@ -1416,17 +1416,19 @@ impl Engine {
         let snapshot = self.match_records(plan.clone())?;
         let handle = self.next_subscription_handle(&plan, snapshot.snapshot())?;
         let initial = InitialSnapshot::new(handle, snapshot);
+        self.persist_subscription(handle, plan.filter().clone())?;
+        self.subscriptions.add_pending(ActiveSubscription::pending(
+            handle,
+            plan.clone(),
+            sink.clone(),
+            self.subscriptions.failure_recorder(),
+        ))?;
+        drop(_write_guard);
         sink.deliver(crate::SubscriptionEvent::InitialSnapshot(initial.clone()))
             .map_err(|error| Error::SubscriptionSink {
                 message: error.message().to_owned(),
             })?;
-        self.persist_subscription(handle, plan.filter().clone())?;
-        self.subscriptions.add(ActiveSubscription::new(
-            handle,
-            plan,
-            sink,
-            self.subscriptions.failure_recorder(),
-        ))?;
+        self.subscriptions.activate(handle)?;
         Ok(SubscriptionReceipt::new(handle, initial))
     }
 

@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
@@ -363,6 +364,30 @@ impl SubscriptionRegistry {
         Ok(())
     }
 
+    pub(crate) fn add_pending<RecordValue>(
+        &self,
+        entry: ActiveSubscription<RecordValue>,
+    ) -> crate::Result<()>
+    where
+        RecordValue: Clone + Send + Sync + 'static,
+    {
+        self.add(entry)
+    }
+
+    pub(crate) fn activate(&self, handle: SubscriptionHandle) -> crate::Result<()> {
+        let entry = self
+            .entries
+            .lock()
+            .map_err(|_| crate::Error::SubscriptionRegistryPoisoned)?
+            .iter()
+            .find(|entry| entry.handle() == handle)
+            .cloned();
+        if let Some(entry) = entry {
+            entry.drain_pending();
+        }
+        Ok(())
+    }
+
     pub(crate) fn deliver_delta<RecordValue>(
         &self,
         kind: DeltaKind,
@@ -417,10 +442,16 @@ pub(crate) struct ActiveSubscription<RecordValue> {
     plan: QueryPlan<RecordValue>,
     sink: Arc<dyn SubscriptionSink<RecordValue>>,
     failures: SubscriptionFailureRecorder,
+    lifecycle: Mutex<SubscriptionLifecycle<RecordValue>>,
+}
+
+enum SubscriptionLifecycle<RecordValue> {
+    Pending(VecDeque<SubscriptionEvent<RecordValue>>),
+    Active,
 }
 
 impl<RecordValue> ActiveSubscription<RecordValue> {
-    pub(crate) fn new(
+    pub(crate) fn pending(
         handle: SubscriptionHandle,
         plan: QueryPlan<RecordValue>,
         sink: Arc<dyn SubscriptionSink<RecordValue>>,
@@ -431,6 +462,7 @@ impl<RecordValue> ActiveSubscription<RecordValue> {
             plan,
             sink,
             failures,
+            lifecycle: Mutex::new(SubscriptionLifecycle::Pending(VecDeque::new())),
         }
     }
 
@@ -440,6 +472,7 @@ impl<RecordValue> ActiveSubscription<RecordValue> {
 }
 
 trait ErasedSubscription: Send + Sync {
+    fn handle(&self) -> SubscriptionHandle;
     fn deliver_delta(
         &self,
         kind: DeltaKind,
@@ -448,12 +481,18 @@ trait ErasedSubscription: Send + Sync {
         snapshot: SnapshotIdentifier,
         record: &dyn Any,
     );
+
+    fn drain_pending(&self);
 }
 
 impl<RecordValue> ErasedSubscription for ActiveSubscription<RecordValue>
 where
     RecordValue: Clone + Send + Sync + 'static,
 {
+    fn handle(&self) -> SubscriptionHandle {
+        self.handle
+    }
+
     fn deliver_delta(
         &self,
         kind: DeltaKind,
@@ -479,6 +518,56 @@ where
             record.clone(),
         );
         let event = SubscriptionEvent::Delta(delta);
+        let Ok(mut lifecycle) = self.lifecycle.lock() else {
+            self.failures
+                .record(SubscriptionFanoutFailure::RegistryUnavailable);
+            return;
+        };
+        if let SubscriptionLifecycle::Pending(events) = &mut *lifecycle {
+            events.push_back(event);
+            return;
+        }
+        drop(lifecycle);
+        self.deliver_event(event);
+    }
+
+    fn drain_pending(&self) {
+        loop {
+            let event = {
+                let Ok(mut lifecycle) = self.lifecycle.lock() else {
+                    self.failures
+                        .record(SubscriptionFanoutFailure::RegistryUnavailable);
+                    return;
+                };
+                match &mut *lifecycle {
+                    SubscriptionLifecycle::Pending(events) => events.pop_front(),
+                    SubscriptionLifecycle::Active => return,
+                }
+            };
+            let Some(event) = event else {
+                let Ok(mut lifecycle) = self.lifecycle.lock() else {
+                    self.failures
+                        .record(SubscriptionFanoutFailure::RegistryUnavailable);
+                    return;
+                };
+                if let SubscriptionLifecycle::Pending(events) = &mut *lifecycle
+                    && events.is_empty()
+                {
+                    *lifecycle = SubscriptionLifecycle::Active;
+                    return;
+                }
+                continue;
+            };
+            self.deliver_event(event);
+        }
+    }
+}
+
+impl<RecordValue> ActiveSubscription<RecordValue>
+where
+    RecordValue: Clone + Send + Sync + 'static,
+{
+    fn deliver_event(&self, event: SubscriptionEvent<RecordValue>) {
         match self.sink.delivery_mode() {
             SubscriptionDeliveryMode::Detached => {
                 let sink = Arc::clone(&self.sink);

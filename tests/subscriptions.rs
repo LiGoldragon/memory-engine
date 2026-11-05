@@ -175,7 +175,6 @@ struct EstablishmentRaceSink {
     started: Sender<()>,
     started_receiver: Mutex<Receiver<()>>,
     completed: Arc<AtomicBool>,
-    completed_during_initial: Arc<AtomicBool>,
     events: Mutex<Vec<SubscriptionEvent<SubscribedRecord>>>,
 }
 
@@ -206,10 +205,12 @@ impl SubscriptionSink<SubscribedRecord> for EstablishmentRaceSink {
                 .recv_timeout(Duration::from_secs(2))
                 .expect("writer reaches the race boundary");
             std::thread::sleep(Duration::from_millis(50));
-            self.completed_during_initial
-                .store(self.completed.load(Ordering::Acquire), Ordering::Release);
         }
         Ok(())
+    }
+
+    fn delivery_mode(&self) -> SubscriptionDeliveryMode {
+        SubscriptionDeliveryMode::Inline
     }
 }
 
@@ -294,14 +295,12 @@ fn subscription_establishment_covers_a_racing_write_once() {
     let engine = Arc::new(engine);
     let (started_sender, started_receiver) = mpsc::channel();
     let completed = Arc::new(AtomicBool::new(false));
-    let completed_during_initial = Arc::new(AtomicBool::new(false));
     let sink = Arc::new(EstablishmentRaceSink {
         engine: Arc::clone(&engine),
         table: records,
         started: started_sender,
         started_receiver: Mutex::new(started_receiver),
         completed: Arc::clone(&completed),
-        completed_during_initial: Arc::clone(&completed_during_initial),
         events: Mutex::new(Vec::new()),
     });
 
@@ -315,16 +314,11 @@ fn subscription_establishment_covers_a_racing_write_once() {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(completed.load(Ordering::Acquire), "racing write completes");
-    assert!(!completed_during_initial.load(Ordering::Acquire));
     let events = sink.events.lock().expect("race events lock");
     assert_eq!(receipt.initial().snapshot().records().len(), 0);
-    assert_eq!(
-        events
-            .iter()
-            .filter(|event| matches!(event, SubscriptionEvent::Delta(_)))
-            .count(),
-        1
-    );
+    assert_eq!(events.len(), 2);
+    assert!(matches!(events[0], SubscriptionEvent::InitialSnapshot(_)));
+    assert!(matches!(events[1], SubscriptionEvent::Delta(_)));
 }
 
 #[test]
