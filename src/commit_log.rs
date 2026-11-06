@@ -22,9 +22,9 @@ use ::memory::WriteTransaction;
 use crate::log::CommitLogEntry;
 use crate::{CommitSequence, EntryDigest, Result, SequenceRange, VersionedCommitLogEntry};
 
-const COMMIT_LOG: ::memory::Table<u64, CommitLogEntry> =
+pub(crate) const COMMIT_LOG: ::memory::Table<u64, CommitLogEntry> =
     ::memory::Table::new("__memory_engine_commit_log");
-const VERSIONED_COMMIT_LOG: ::memory::Table<u64, VersionedCommitLogEntry> =
+pub(crate) const VERSIONED_COMMIT_LOG: ::memory::Table<u64, VersionedCommitLogEntry> =
     ::memory::Table::new("__memory_engine_versioned_commit_log");
 /// The persisted versioned chain-head digest: the entry digest of the
 /// most recent versioned commit log entry, updated inside the same
@@ -33,9 +33,9 @@ const VERSIONED_COMMIT_LOG: ::memory::Table<u64, VersionedCommitLogEntry> =
 /// optimization for minting the next entry's predecessor digest only;
 /// integrity is never read from here — [`crate::fold::CanonicalView::fold`]
 /// recomputes every entry digest and verifies the chain link by link.
-const CHAIN_HEAD: ::memory::Table<&'static str, EntryDigest> =
+pub(crate) const CHAIN_HEAD: ::memory::Table<&'static str, EntryDigest> =
     ::memory::Table::new("__memory_engine_chain_head");
-const LATEST_ENTRY_DIGEST_KEY: &str = "latest_entry_digest";
+pub(crate) const LATEST_ENTRY_DIGEST_KEY: &str = "latest_entry_digest";
 const COUNTERS: ::memory::Table<&'static str, u64> =
     ::memory::Table::new("__memory_engine_counters");
 /// Row counts for the commit log and the versioned commit log,
@@ -253,7 +253,7 @@ impl<'engine> CommitLog<'engine> {
         // Recompute and verify the whole chain from genesis. A tampered
         // or forked log surfaces as a typed VersionedChainBroken here,
         // aborting the open before any derived slot is written.
-        crate::fold::CanonicalView::fold(&[], &entries, None)?;
+        crate::fold::CanonicalView::fold(&[], &entries, crate::fold::ChainOrigin::Genesis)?;
         let commit_count = storage
             .read(|transaction| COMMIT_LOG.iter(transaction))?
             .len() as u64;

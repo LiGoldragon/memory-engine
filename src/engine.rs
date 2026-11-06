@@ -18,7 +18,9 @@ use crate::checkpoint::{
 use crate::commit_log::DerivedSlots;
 use crate::commit_log::{CommitLog, LogCounts};
 use crate::compaction::{CompactionFault, CompactionIntent, CompactionPhase};
-use crate::fold::{CanonicalView, FamilyDirectory, RebuildReceipt, RowMaterializer, ViewRow};
+use crate::fold::{
+    CanonicalView, ChainOrigin, FamilyDirectory, RebuildReceipt, RowMaterializer, ViewRow,
+};
 use crate::import::{ImportReceipt, ImportSession};
 use crate::log::{CommitLogEntry, CommitLogOperation};
 use crate::open::{EngineOpen, FamilyKeying, OpenFault};
@@ -42,14 +44,14 @@ use crate::{
     VersionedRecoveryTopology, VersionedReplay, VersioningPolicy, WriteOperation,
 };
 
-const CATALOG: ::memory::Table<&'static str, TableRegistration> =
+pub(crate) const CATALOG: ::memory::Table<&'static str, TableRegistration> =
     ::memory::Table::new("__memory_engine_catalog");
 pub(crate) const COUNTERS: ::memory::Table<&'static str, u64> =
     ::memory::Table::new("__memory_engine_counters");
 pub(crate) const LATEST_COMMIT_SEQUENCE_KEY: &str = "latest_commit_sequence";
 pub(crate) const LATEST_SNAPSHOT_KEY: &str = "latest_snapshot";
 const NEXT_SUBSCRIPTION_KEY: &str = "next_subscription";
-const LATEST_CHECKPOINT_KEY: &str = "latest_checkpoint";
+pub(crate) const LATEST_CHECKPOINT_KEY: &str = "latest_checkpoint";
 const STORAGE_LAYOUT_KEY: &str = "engine_storage_layout";
 /// Engine-internal storage layout version. Layout 2 introduced typed
 /// family identity in the catalog and versioned log; layout 3 added
@@ -67,18 +69,18 @@ const STORAGE_LAYOUT_KEY: &str = "engine_storage_layout";
 const STORAGE_LAYOUT: u64 = 7;
 /// The layout of stores written before the layout slot existed.
 const LAYOUT_BEFORE_SLOT: u64 = 1;
-const SUBSCRIPTIONS: ::memory::Table<u64, SubscriptionRegistration> =
+pub(crate) const SUBSCRIPTIONS: ::memory::Table<u64, SubscriptionRegistration> =
     ::memory::Table::new("__memory_engine_subscriptions");
-const IDENTIFIED_COUNTERS: ::memory::Table<String, u64> =
+pub(crate) const IDENTIFIED_COUNTERS: ::memory::Table<String, u64> =
     ::memory::Table::new("__memory_engine_identified_counters");
-const CHECKPOINTS: ::memory::Table<u64, CheckpointMetadata> =
+pub(crate) const CHECKPOINTS: ::memory::Table<u64, CheckpointMetadata> =
     ::memory::Table::new("__memory_engine_checkpoints");
-const CHECKPOINT_SEGMENTS: ::memory::Table<&'static [u8; 32], CheckpointSegment> =
+pub(crate) const CHECKPOINT_SEGMENTS: ::memory::Table<&'static [u8; 32], CheckpointSegment> =
     ::memory::Table::new("__memory_engine_checkpoint_segments");
-const VERSIONING_POLICY: ::memory::Table<&'static str, VersioningPolicy> =
+pub(crate) const VERSIONING_POLICY: ::memory::Table<&'static str, VersioningPolicy> =
     ::memory::Table::new("__memory_engine_versioning_policy");
 const VERSIONING_POLICY_KEY: &str = "configured";
-const COMPACTION_INTENT: ::memory::Table<&'static str, CompactionIntent> =
+pub(crate) const COMPACTION_INTENT: ::memory::Table<&'static str, CompactionIntent> =
     ::memory::Table::new("__memory_engine_compaction_intent");
 const COMPACTION_INTENT_KEY: &str = "pending";
 
@@ -1645,9 +1647,7 @@ impl Engine {
         let (Some(first_entry), Some(last_entry)) = (entries.first(), entries.last()) else {
             return Err(Error::CheckpointNothingToCover);
         };
-        let chain_head = previous_metadata
-            .as_ref()
-            .map(CheckpointMetadata::covered_entry_digest);
+        let origin = ChainOrigin::after(previous_metadata.as_ref());
         let covered = CommitSequenceRange::new(
             previous_metadata
                 .as_ref()
@@ -1665,7 +1665,7 @@ impl Engine {
             .as_ref()
             .map(CheckpointMetadata::checkpoint_digest);
 
-        let view = CanonicalView::fold(&previous_rows, &entries, chain_head)?;
+        let view = CanonicalView::fold(&previous_rows, &entries, origin)?;
         let view_digest = view.digest();
         let inventory_families = self.family_inventory();
         let materialize = view.into_rows(&inventory_families)?;
@@ -1959,16 +1959,13 @@ impl Engine {
         }
         self.ensure_versioned_log_complete()?;
         let checkpoint = self.latest_checkpoint()?;
-        let (checkpoint_rows, chain_head, after) = match &checkpoint {
-            Some(checkpoint) => (
-                checkpoint.rows(),
-                Some(checkpoint.metadata().covered_entry_digest()),
-                checkpoint.metadata().covered().last(),
-            ),
-            None => (Vec::new(), None, crate::CommitSequence::genesis()),
+        let (checkpoint_rows, after) = match &checkpoint {
+            Some(checkpoint) => (checkpoint.rows(), checkpoint.metadata().covered().last()),
+            None => (Vec::new(), crate::CommitSequence::genesis()),
         };
+        let origin = ChainOrigin::after(checkpoint.as_ref().map(Checkpoint::metadata));
         let entries = self.versioned_commit_log_from_sequence(after.next())?;
-        let view = CanonicalView::fold(&checkpoint_rows, &entries, chain_head)?;
+        let view = CanonicalView::fold(&checkpoint_rows, &entries, origin)?;
         let view_digest = view.digest();
         let materialize = view.into_rows(&self.family_inventory())?;
         self.storage.write(|transaction| {
@@ -2035,7 +2032,7 @@ impl Engine {
         let view = CanonicalView::fold(
             &checkpoint.rows(),
             &suffix,
-            Some(metadata.covered_entry_digest()),
+            ChainOrigin::after(Some(&metadata)),
         )?;
         let view_digest = view.digest();
         let materialize = view.into_rows(metadata.family_inventory().families())?;
@@ -2428,6 +2425,7 @@ impl Engine {
                 });
             }
             let recomputed = crate::EntryDigest::from_entry_fields(
+                crate::versioning::DigestNamespace::Memory,
                 entry.store_name(),
                 entry.schema_hash(),
                 entry.commit_sequence(),

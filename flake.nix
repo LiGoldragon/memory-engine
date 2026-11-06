@@ -29,11 +29,13 @@
           "ARCHITECTURE.md"
           "skills.md"
         ];
+        semaFixture = path: _type: pkgs.lib.hasSuffix ".sema" (baseNameOf path);
         src = pkgs.lib.cleanSourceWith {
           src = ./.;
           filter = path: type:
             (craneLib.filterCargoSources path type)
-            || (repoContextFile path type);
+            || (repoContextFile path type)
+            || (semaFixture path type);
         };
         commonArgs = {
           inherit src;

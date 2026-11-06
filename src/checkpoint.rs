@@ -7,7 +7,8 @@
 
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize, rancor};
 
-use crate::fold::{ViewDigest, ViewRow};
+use crate::fold::{ChainOrigin, ViewDigest, ViewRow};
+use crate::versioning::DigestNamespace;
 use crate::{
     CommitSequence, EntryDigest, Error, FamilyIdentity, Result, SnapshotIdentifier,
     StoreSchemaHash, VersionedStoreName,
@@ -299,8 +300,12 @@ impl CheckpointSegment {
     }
 
     pub fn digest(&self) -> SegmentDigest {
+        self.digest_in(DigestNamespace::Memory)
+    }
+
+    pub(crate) fn digest_in(&self, namespace: DigestNamespace) -> SegmentDigest {
         let mut hasher = blake3::Hasher::new();
-        EntryDigest::update_bytes(&mut hasher, b"memory-engine-checkpoint-segment-v1");
+        EntryDigest::update_bytes(&mut hasher, namespace.checkpoint_segment());
         hasher.update(&(self.rows.len() as u64).to_le_bytes());
         for row in &self.rows {
             row.update_digest(&mut hasher);
@@ -380,7 +385,7 @@ impl CheckpointMetadata {
             segments,
             checkpoint_digest: CheckpointDigest::new([0; 32]),
         };
-        metadata.checkpoint_digest = metadata.computed_digest();
+        metadata.checkpoint_digest = metadata.computed_digest(DigestNamespace::Memory);
         metadata
     }
 
@@ -431,9 +436,9 @@ impl CheckpointMetadata {
         self.checkpoint_digest
     }
 
-    fn computed_digest(&self) -> CheckpointDigest {
+    fn computed_digest(&self, namespace: DigestNamespace) -> CheckpointDigest {
         let mut hasher = blake3::Hasher::new();
-        EntryDigest::update_bytes(&mut hasher, b"memory-engine-checkpoint-v1");
+        EntryDigest::update_bytes(&mut hasher, namespace.checkpoint());
         hasher.update(&self.sequence.value().to_le_bytes());
         EntryDigest::update_bytes(&mut hasher, self.store_name.as_str().as_bytes());
         EntryDigest::update_bytes(&mut hasher, self.store_schema_hash.bytes());
@@ -499,7 +504,12 @@ impl Checkpoint {
     /// metadata, each segment against its reference, and the view
     /// digest against the folded segment rows.
     pub fn verify(&self) -> Result<()> {
-        let computed = self.metadata.computed_digest();
+        self.verify_in(DigestNamespace::Memory)
+    }
+
+    /// [`Self::verify`] under the labels of `namespace`.
+    pub(crate) fn verify_in(&self, namespace: DigestNamespace) -> Result<()> {
+        let computed = self.metadata.computed_digest(namespace);
         if computed != self.metadata.checkpoint_digest {
             return Err(Error::CheckpointDigestMismatch {
                 stored: self.metadata.checkpoint_digest,
@@ -525,7 +535,7 @@ impl Checkpoint {
             std::cmp::Ordering::Equal => {}
         }
         for (segment, reference) in self.segments.iter().zip(&self.metadata.segments) {
-            let computed = segment.digest();
+            let computed = segment.digest_in(namespace);
             if computed != reference.digest() {
                 return Err(Error::SegmentDigestMismatch {
                     referenced: reference.digest(),
@@ -533,8 +543,8 @@ impl Checkpoint {
                 });
             }
         }
-        let view = crate::fold::CanonicalView::fold(&self.rows(), &[], None)?;
-        let computed_view = view.digest();
+        let view = crate::fold::CanonicalView::fold(&self.rows(), &[], ChainOrigin::Genesis)?;
+        let computed_view = view.digest_in(namespace);
         if computed_view != self.metadata.view_digest {
             return Err(Error::ViewDigestMismatch {
                 expected: self.metadata.view_digest,

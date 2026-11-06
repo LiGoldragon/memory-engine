@@ -27,6 +27,7 @@ pub mod open;
 pub mod outbox;
 pub mod query;
 pub mod record;
+pub mod sema_conversion;
 pub mod sequence;
 pub mod snapshot;
 pub mod staging;
@@ -74,6 +75,7 @@ pub use query::{
 pub use record::{
     EngineRecord, EngineStoredRecord, EngineStoredValue, RecordIdentifier, RecordKey, RecordKeyKind,
 };
+pub use sema_conversion::{LegacySemaStore, SemaConversion};
 pub use sequence::CommitSequence;
 pub use snapshot::{DatabaseMarker, SnapshotIdentifier};
 pub use staging::{

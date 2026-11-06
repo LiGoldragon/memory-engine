@@ -204,8 +204,8 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "memory"
-version = "0.1.1"
-source = "git+https://github.com/LiGoldragon/memory.git?rev=69d91c486b335575ee5e4b0eb79da27094e700b6#69d91c486b335575ee5e4b0eb79da27094e700b6"
+version = "0.2.0"
+source = "git+https://github.com/LiGoldragon/memory.git?rev=e78519c2fc8f213246328bf28f9e38f9a216f76e#e78519c2fc8f213246328bf28f9e38f9a216f76e"
 dependencies = [
  "redb",
  "rkyv",
@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "memory-engine"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "blake3",
  "memory",

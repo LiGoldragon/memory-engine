@@ -326,6 +326,21 @@ pub enum Error {
 
     #[error("read plan operator is not implemented yet: {operator:?}")]
     UnsupportedReadPlan { operator: crate::ReadOperator },
+
+    #[error(
+        "sema store entry at commit sequence {sequence} carries store schema hash {schema_hash}, \
+         which no family list the store holds derives"
+    )]
+    SemaSchemaHashUnmatched {
+        sequence: u64,
+        schema_hash: StoreSchemaHash,
+    },
+
+    #[error(
+        "sema store holds a parked staged group or a pending compaction intent; settle it \
+         under the engine that wrote the store before converting"
+    )]
+    SemaStagingPending,
 }
 
 impl Error {

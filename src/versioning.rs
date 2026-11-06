@@ -234,10 +234,25 @@ impl StoreSchemaHash {
         &self.0
     }
 
-    fn from_inventory(mut inventory: Vec<(&FamilyName, SchemaHash)>) -> Self {
+    /// The store schema hash of a family list, under the labels of
+    /// `namespace`.
+    pub(crate) fn of_families(families: &[FamilyIdentity], namespace: DigestNamespace) -> Self {
+        Self::from_inventory(
+            families
+                .iter()
+                .map(|identity| (identity.family(), identity.schema_hash()))
+                .collect(),
+            namespace,
+        )
+    }
+
+    fn from_inventory(
+        mut inventory: Vec<(&FamilyName, SchemaHash)>,
+        namespace: DigestNamespace,
+    ) -> Self {
         inventory.sort();
         let mut hasher = blake3::Hasher::new();
-        EntryDigest::update_bytes(&mut hasher, b"memory-engine-store-schema-hash-v1");
+        EntryDigest::update_bytes(&mut hasher, namespace.store_schema_hash());
         hasher.update(&(inventory.len() as u64).to_le_bytes());
         for (family, schema_hash) in inventory {
             EntryDigest::update_bytes(&mut hasher, family.as_str().as_bytes());
@@ -260,18 +275,14 @@ impl From<&Catalog> for StoreSchemaHash {
                     )
                 })
                 .collect(),
+            DigestNamespace::Memory,
         )
     }
 }
 
 impl From<&[FamilyIdentity]> for StoreSchemaHash {
     fn from(families: &[FamilyIdentity]) -> Self {
-        Self::from_inventory(
-            families
-                .iter()
-                .map(|identity| (identity.family(), identity.schema_hash()))
-                .collect(),
-        )
+        Self::of_families(families, DigestNamespace::Memory)
     }
 }
 
@@ -352,6 +363,55 @@ impl std::fmt::Display for FamilyIdentity {
     }
 }
 
+/// The labels mixed into the engine's five content hashes: the store
+/// schema hash, the versioned entry digest, the checkpoint segment
+/// digest, the checkpoint digest and the view digest. `Memory` is the
+/// format this engine writes; `Sema` is the format sema-engine wrote,
+/// read only to verify a store before [`crate::LegacySemaStore`]
+/// converts it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DigestNamespace {
+    Memory,
+    Sema,
+}
+
+impl DigestNamespace {
+    pub(crate) const fn store_schema_hash(self) -> &'static [u8] {
+        match self {
+            Self::Memory => b"memory-engine-store-schema-hash-v1",
+            Self::Sema => b"sema-engine-store-schema-hash-v1",
+        }
+    }
+
+    pub(crate) const fn versioned_entry(self) -> &'static [u8] {
+        match self {
+            Self::Memory => b"memory-engine-versioned-commit-log-entry-v2",
+            Self::Sema => b"sema-engine-versioned-commit-log-entry-v2",
+        }
+    }
+
+    pub(crate) const fn checkpoint_segment(self) -> &'static [u8] {
+        match self {
+            Self::Memory => b"memory-engine-checkpoint-segment-v1",
+            Self::Sema => b"sema-engine-checkpoint-segment-v1",
+        }
+    }
+
+    pub(crate) const fn checkpoint(self) -> &'static [u8] {
+        match self {
+            Self::Memory => b"memory-engine-checkpoint-v1",
+            Self::Sema => b"sema-engine-checkpoint-v1",
+        }
+    }
+
+    pub(crate) const fn view(self) -> &'static [u8] {
+        match self {
+            Self::Memory => b"memory-engine-view-digest-v1",
+            Self::Sema => b"sema-engine-view-digest-v1",
+        }
+    }
+}
+
 #[derive(
     Archive,
     RkyvSerialize,
@@ -377,6 +437,7 @@ impl EntryDigest {
     }
 
     pub(crate) fn from_entry_fields(
+        namespace: DigestNamespace,
         store_name: &VersionedStoreName,
         schema_hash: StoreSchemaHash,
         commit_sequence: CommitSequence,
@@ -385,7 +446,7 @@ impl EntryDigest {
         operations: &NonEmpty<VersionedLogOperation>,
     ) -> Self {
         let mut hasher = blake3::Hasher::new();
-        Self::update_bytes(&mut hasher, b"memory-engine-versioned-commit-log-entry-v2");
+        Self::update_bytes(&mut hasher, namespace.versioned_entry());
         Self::update_bytes(&mut hasher, store_name.as_str().as_bytes());
         Self::update_bytes(&mut hasher, schema_hash.bytes());
         hasher.update(&commit_sequence.value().to_le_bytes());
@@ -542,6 +603,7 @@ impl VersionedCommitLogEntry {
         operations: NonEmpty<VersionedLogOperation>,
     ) -> Self {
         let entry_digest = EntryDigest::from_entry_fields(
+            DigestNamespace::Memory,
             &store_name,
             schema_hash,
             commit_sequence,

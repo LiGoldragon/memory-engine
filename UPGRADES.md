@@ -1,5 +1,44 @@
 # Upgrades
 
+## 0.19.0 — Convert a store sema-engine wrote
+
+A store written by sema-engine 0.15 (storage layout 7, over the sema
+kernel) does not open on 0.18.0: its tables carry `__sema_` names and
+its five content hashes carry `sema-engine-…` labels. 0.19.0 converts
+it in place with one call, in one write transaction:
+
+```rust
+let conversion = LegacySemaStore::new(&copy).convert()?;
+```
+
+To move a consumer whose deployed store sema-engine wrote:
+
+1. Copy the legacy file, convert the copy, and on `Ok` rename the copy
+   to the store's memory path; on `Err` the copy is as it was and the
+   original stands. Then open with `Engine::open` as before.
+2. Handle the refusals: `Error::SemaSchemaHashUnmatched` (an entry's
+   store schema hash matches neither the catalog nor any checkpoint's
+   family list), `Error::SemaStagingPending` (settle the parked staged
+   group or compaction intent under the engine that wrote the store
+   first), the store's own verification errors (`VersionedChainBroken`,
+   `CheckpointDigestMismatch`, `SegmentDigestMismatch`,
+   `ViewDigestMismatch`, `CheckpointSchemaMismatch`,
+   `OutboxEntryMismatch`, `MirrorHeadForked`, `SegmentMissing`), and
+   the kernel's `NotSemaFile` / `AlreadyMemoryFile` inside
+   `Error::Memory`.
+3. The receipt `SemaConversion` names the entries, checkpoints and
+   segments rewritten and the entry digests compaction had cut off,
+   kept in sema form as chain origins; the next compaction replaces
+   them.
+
+`Error` gains `SemaSchemaHashUnmatched` and `SemaStagingPending`;
+exhaustive matches over it need the new arms. The storage layout stays
+7 and a store in the memory format opens as before.
+
+memory-engine now pins memory 0.2.0 (`e78519c`), which adds `SemaFile`
+and `Table::rename_from`. A consumer that also depends on memory
+directly pins the same revision.
+
 ## 0.18.0 — Memorable: typed change and typed upgrade replace `with_prior`
 
 `TableDescriptor::with_prior(SchemaHash, Fn(Prior) -> Current)` and

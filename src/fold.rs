@@ -15,6 +15,7 @@ use rkyv::validation::shared::SharedValidator;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use signal_sema::SemaOperation;
 
+use crate::versioning::DigestNamespace;
 use crate::{
     EngineStoredValue, EntryDigest, Error, FamilyIdentity, FamilyName, IdentifiedTableReference,
     RecordKey, Result, SchemaHash, TableReference, VersionedCommitLogEntry, VersionedLogOperation,
@@ -143,6 +144,41 @@ impl ViewIdentityKey {
     }
 }
 
+/// Where a folded run of versioned entries starts: the predecessor its
+/// first entry must name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChainOrigin {
+    /// The start of the store's history: the first entry names no
+    /// predecessor.
+    Genesis,
+    /// A checkpoint's covered head: the digest of the last entry the
+    /// checkpoint folds. The fold takes it as given and never recomputes
+    /// it, because the entry it names may be gone — compaction deletes
+    /// the covered entries, and a store converted from sema keeps that
+    /// cut-off digest in its sema form. It is bound by the checkpoint
+    /// digest, which [`crate::Checkpoint::verify`] recomputes, and the
+    /// first folded entry must name it.
+    Checkpoint(EntryDigest),
+}
+
+impl ChainOrigin {
+    /// The origin a fold resumes from after `checkpoint`, or genesis
+    /// when there is none.
+    pub(crate) fn after(checkpoint: Option<&crate::CheckpointMetadata>) -> Self {
+        match checkpoint {
+            Some(metadata) => Self::Checkpoint(metadata.covered_entry_digest()),
+            None => Self::Genesis,
+        }
+    }
+
+    fn predecessor(self) -> Option<EntryDigest> {
+        match self {
+            Self::Genesis => None,
+            Self::Checkpoint(digest) => Some(digest),
+        }
+    }
+}
+
 /// The fold state: per-key last-write payloads after applying
 /// checkpoint rows and versioned log operations in order, plus the
 /// set of every key the fold ever touched (for clearing stale
@@ -175,24 +211,24 @@ impl CanonicalView {
 
     /// Fold checkpoint rows (if any) plus versioned log entries into
     /// the canonical view, verifying the entry digest chain link by
-    /// link from `chain_head` (the digest the first applied entry must
-    /// name as its predecessor). Each entry digest is recomputed from
-    /// the entry's own fields, so a tampered entry cannot ride a
-    /// stored digest through the chain — the digest covers the store
-    /// name, schema hash, sequence, snapshot, predecessor, and every
+    /// link from `origin`. Each entry digest is recomputed from the
+    /// entry's own fields, so a tampered entry cannot ride a stored
+    /// digest through the chain — the digest covers the store name,
+    /// schema hash, sequence, snapshot, predecessor, and every
     /// operation.
     pub(crate) fn fold(
         checkpoint_rows: &[ViewRow],
         entries: &[VersionedCommitLogEntry],
-        chain_head: Option<EntryDigest>,
+        origin: ChainOrigin,
     ) -> Result<Self> {
         let mut view = Self::empty();
         for row in checkpoint_rows {
             view.apply_checkpoint_row(row)?;
         }
-        let mut previous = chain_head;
+        let mut previous = origin.predecessor();
         for entry in entries {
             let recomputed = EntryDigest::from_entry_fields(
+                DigestNamespace::Memory,
                 entry.store_name(),
                 entry.schema_hash(),
                 entry.commit_sequence(),
@@ -258,8 +294,12 @@ impl CanonicalView {
     }
 
     pub(crate) fn digest(&self) -> ViewDigest {
+        self.digest_in(DigestNamespace::Memory)
+    }
+
+    pub(crate) fn digest_in(&self, namespace: DigestNamespace) -> ViewDigest {
         let mut hasher = blake3::Hasher::new();
-        EntryDigest::update_bytes(&mut hasher, b"memory-engine-view-digest-v1");
+        EntryDigest::update_bytes(&mut hasher, namespace.view());
         hasher.update(&(self.rows.len() as u64).to_le_bytes());
         for (key, payload) in &self.rows {
             EntryDigest::update_bytes(&mut hasher, key.family.as_str().as_bytes());

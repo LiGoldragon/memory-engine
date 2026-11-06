@@ -46,9 +46,9 @@ use crate::{
     VersionedPayload, VersionedStoreName,
 };
 
-const STAGING_SLOT: ::memory::Table<&'static str, StagedOperationGroup> =
+pub(crate) const STAGING_SLOT: ::memory::Table<&'static str, StagedOperationGroup> =
     ::memory::Table::new("__memory_engine_staging_slot");
-const STAGED_GROUP_KEY: &str = "staged_group";
+pub(crate) const STAGED_GROUP_KEY: &str = "staged_group";
 
 /// One durably parked operation group: the ordered would-be versioned
 /// commit log entries a head-advancing operation built, chained from

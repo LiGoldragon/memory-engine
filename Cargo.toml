@@ -1,6 +1,6 @@
 [package]
 name         = "memory-engine"
-version      = "0.18.0"
+version      = "0.19.0"
 edition      = "2024"
 rust-version = "1.89"
 license      = "MIT OR Apache-2.0"
@@ -15,7 +15,7 @@ path = "src/lib.rs"
 [dependencies]
 blake3 = "1"
 rkyv = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
-memory = { git = "https://github.com/LiGoldragon/memory.git", rev = "69d91c486b335575ee5e4b0eb79da27094e700b6" }
+memory = { git = "https://github.com/LiGoldragon/memory.git", rev = "e78519c2fc8f213246328bf28f9e38f9a216f76e" }
 signal-sema = { git = "https://github.com/LiGoldragon/signal-sema.git", rev = "4f3a24e6677ab9d200672851016c4c760c1e36e8", default-features = false }
 thiserror = "2"
 

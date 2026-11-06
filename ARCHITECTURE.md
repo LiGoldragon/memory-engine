@@ -571,6 +571,15 @@ entry digest chain link by link *and* recomputes each entry digest
 from the entry's own fields, so a tampered entry cannot ride a stored
 digest through the chain.
 
+The fold starts from a typed origin. `Genesis` is the start of history:
+the first entry names no predecessor. `Checkpoint` is a checkpoint's
+covered entry digest: the first entry after the checkpoint must name
+it. The fold takes that digest as given and never recomputes it,
+because the entry it names may be gone — compaction deletes the covered
+entries, and a store converted from sema-engine keeps such a cut-off
+digest in its sema form (below). It is bound instead by the checkpoint
+digest, which `Checkpoint::verify` recomputes over every metadata field.
+
 `Engine::latest_checkpoint()` loads metadata plus segments and
 verifies every content address before returning the portable
 `Checkpoint` artifact.
@@ -651,6 +660,46 @@ before any family-to-table registration. The data tables are already
 correct in a layout-4 store (the bump was additive); only the missing
 derived slots are rebuilt. `rebuild_from_log` is the full materialized-
 view rebuild and still requires a directory and a registered inventory.
+
+## Converting a sema-engine store
+
+Before the rename to Memory, this engine was sema-engine and its kernel
+was sema. A store sema-engine 0.15 wrote (storage layout 7) holds the
+same rows this engine reads, with two differences: its tables are named
+`__sema_engine_*` (and the kernel's `__sema_meta`, `__sema_headers`), and
+five content hashes — store schema hash, versioned entry digest,
+checkpoint segment digest, checkpoint digest, view digest — mix in
+`sema-engine-…` labels where this engine mixes in `memory-engine-…`.
+
+`LegacySemaStore::new(path).convert()` is the edit those differences
+need. It opens the file read-only through the kernel's `SemaFile`,
+reads every row it rewrites, and verifies the store under the sema
+labels (entry digests and links, checkpoint, segment and view digests,
+checkpoint schema hashes), so a damaged store is refused, not re-signed.
+It then computes, in memory:
+
+- each entry's store schema hash in memory form — a store schema hash
+  is not reversible, so the entry's family list is found by matching
+  the sema hash of each list the store holds (its catalog and each
+  checkpoint's inventory); an entry no list derives is refused with
+  `SemaSchemaHashUnmatched`;
+- each entry's digest, linked to its predecessor's new digest;
+- each checkpoint's segment digests (segments re-keyed), view digest,
+  schema hash, covered entry digest, checkpoint digest, and its link to
+  the previous checkpoint's new digest;
+- the outbox rows and the mirror head of retained entries.
+
+A digest compaction already cut off — a checkpoint's covered entry
+digest naming a deleted entry, and the back-link of the first entry
+after it — is kept verbatim as the chain's `Checkpoint` origin. The
+computed rows are verified the way the engine will read them, and only
+then does one write transaction rename the kernel's and the engine's
+tables and write them. A parked staged group or pending compaction
+intent is refused (`SemaStagingPending`): its prospective digests are
+an external grant's to bind, so it is settled under the engine that
+wrote it. Every refusal happens before the file is opened for writing,
+so a refused file is left byte for byte as it was. The caller converts
+a copy and puts it in place only on success.
 
 ## Mirror outbox and durability levels
 
