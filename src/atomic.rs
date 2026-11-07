@@ -790,7 +790,7 @@ impl Engine {
         let mut tables = HashSet::new();
         let mut prepared_families = Vec::with_capacity(evolution.families.len());
         for family in &evolution.families {
-            if !tables.insert(family.table()) {
+            if !tables.insert(family.table().as_str().to_owned()) {
                 return Err(Error::TableAlreadyRegistered {
                     table: family.table().as_str().to_owned(),
                 });
@@ -798,7 +798,7 @@ impl Engine {
             prepared_families.push(family.prepare(self)?);
         }
         for write in &evolution.writes {
-            if tables.contains(&write.table()) {
+            if tables.contains(write.table().as_str()) {
                 return Err(Error::DuplicateWriteKey {
                     table: write.table().as_str().to_owned(),
                     key: write.key().to_owned_string(),
