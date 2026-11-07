@@ -544,3 +544,320 @@ fn evolved_versioned_store_checkpoints_and_compacts_over_retired_identities() {
         ))
         .expect("post-compaction write maintains cleanly");
 }
+
+const COUNTS: TableName = TableName::new("counts");
+const INDEXES: TableName = TableName::new("indexes");
+const MARKERS: TableName = TableName::new("markers");
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+#[rkyv(derive(Debug))]
+struct CountV1 {
+    key: String,
+    count: u64,
+}
+impl EngineRecord for CountV1 {
+    fn record_key(&self) -> RecordKey {
+        RecordKey::new(self.key.clone())
+    }
+}
+impl MemoryDefinition for CountV1 {
+    fn memory_version() -> MemoryVersion {
+        MemoryVersion::new(1)
+    }
+    fn schema_hash() -> SchemaHash {
+        SchemaHash::for_label("count-v1")
+    }
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+#[rkyv(derive(Debug))]
+struct Count {
+    key: String,
+    count: u64,
+    unit: String,
+}
+impl EngineRecord for Count {
+    fn record_key(&self) -> RecordKey {
+        RecordKey::new(self.key.clone())
+    }
+}
+impl MemoryDefinition for Count {
+    fn memory_version() -> MemoryVersion {
+        MemoryVersion::new(2)
+    }
+    fn schema_hash() -> SchemaHash {
+        SchemaHash::for_label("count-v2")
+    }
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+#[rkyv(derive(Debug))]
+struct Index {
+    key: String,
+}
+impl EngineRecord for Index {
+    fn record_key(&self) -> RecordKey {
+        RecordKey::new(self.key.clone())
+    }
+}
+impl MemoryDefinition for Index {
+    fn memory_version() -> MemoryVersion {
+        MemoryVersion::new(1)
+    }
+    fn schema_hash() -> SchemaHash {
+        SchemaHash::for_label("index-v1")
+    }
+}
+
+#[derive(Archive, RkyvSerialize, RkyvDeserialize, Debug, Clone, PartialEq, Eq)]
+#[rkyv(derive(Debug))]
+struct Marker {
+    key: String,
+    value: String,
+}
+impl EngineRecord for Marker {
+    fn record_key(&self) -> RecordKey {
+        RecordKey::new(self.key.clone())
+    }
+}
+impl MemoryDefinition for Marker {
+    fn memory_version() -> MemoryVersion {
+        MemoryVersion::new(1)
+    }
+    fn schema_hash() -> SchemaHash {
+        SchemaHash::for_label("marker-v1")
+    }
+}
+
+fn count_v1() -> TableDescriptor<CountV1> {
+    TableDescriptor::new(
+        COUNTS,
+        FamilyName::new("count"),
+        SchemaHash::for_label("count-v1"),
+    )
+}
+fn count_v2() -> TableDescriptor<Count> {
+    TableDescriptor::new(
+        COUNTS,
+        FamilyName::new("count"),
+        SchemaHash::for_label("count-v2"),
+    )
+    .with_predecessor::<CountV1>()
+}
+fn indexes() -> TableDescriptor<Index> {
+    TableDescriptor::new(
+        INDEXES,
+        FamilyName::new("index"),
+        SchemaHash::for_label("index-v1"),
+    )
+}
+fn markers() -> TableDescriptor<Marker> {
+    TableDescriptor::new(
+        MARKERS,
+        FamilyName::new("marker"),
+        SchemaHash::for_label("marker-v1"),
+    )
+}
+
+#[test]
+fn heterogeneous_evolution_lands_catalog_rows_and_log_in_one_commit() {
+    let fixture = Fixture::new();
+    let path = fixture.database_path("heterogeneous");
+    let mut predecessor =
+        Engine::open(EngineOpen::new(&path, SchemaVersion::new(1))).expect("predecessor opens");
+    let thoughts = predecessor
+        .register_table(fixture.descriptor_v1())
+        .expect("thoughts register");
+    let counts = predecessor
+        .register_table(count_v1())
+        .expect("counts register");
+    let marker = predecessor
+        .register_table(markers())
+        .expect("marker registers");
+    predecessor
+        .assert(Assertion::new(thoughts, ThoughtV1::new("t", "kept")))
+        .expect("thought stored");
+    predecessor
+        .assert(Assertion::new(
+            counts,
+            CountV1 {
+                key: "c".into(),
+                count: 7,
+            },
+        ))
+        .expect("count stored");
+    predecessor
+        .assert(Assertion::new(
+            marker,
+            Marker {
+                key: "m".into(),
+                value: "old".into(),
+            },
+        ))
+        .expect("marker stored");
+    drop(predecessor);
+
+    let thought_current = fixture.descriptor_v2_with_prior();
+    let count_current = count_v2();
+    let mut engine = Engine::open(
+        EngineOpen::new(&path, SchemaVersion::new(1))
+            .with_family(&thought_current)
+            .with_family(&count_current)
+            .with_family(&markers()),
+    )
+    .expect("predecessor catalog is admitted");
+    let before = engine.commit_log().expect("log reads").len();
+    let thought_inventory = engine
+        .inspect_predecessor::<ThoughtV1, Thought>(&thought_current)
+        .expect("thoughts inspect");
+    let count_inventory = engine
+        .inspect_predecessor::<CountV1, Count>(&count_current)
+        .expect("counts inspect");
+    let marker = engine.register_table(markers()).expect("marker opens");
+    let evolution = engine
+        .begin_atomic_evolution()
+        .evolve(
+            thought_inventory,
+            thought_current,
+            vec![Thought::new("t", "kept", "carried")],
+        )
+        .evolve(
+            count_inventory,
+            count_current,
+            vec![Count {
+                key: "c".into(),
+                count: 7,
+                unit: "items".into(),
+            }],
+        )
+        .register(indexes(), vec![Index { key: "i".into() }])
+        .mutate(
+            marker,
+            Marker {
+                key: "m".into(),
+                value: "new".into(),
+            },
+        );
+    let receipt = engine
+        .commit_atomic_evolution(evolution)
+        .expect("one evolution commits");
+    assert_eq!(receipt.operation_count(), 6);
+    assert_eq!(engine.commit_log().expect("log rereads").len(), before + 1);
+
+    let thoughts = engine
+        .register_table(fixture.descriptor_v2_with_prior())
+        .expect("thoughts current");
+    let counts = engine.register_table(count_v2()).expect("counts current");
+    let indexes = engine.register_table(indexes()).expect("indexes current");
+    assert_eq!(
+        engine
+            .match_records(QueryPlan::all(thoughts))
+            .unwrap()
+            .records()[0]
+            .mood,
+        "carried"
+    );
+    assert_eq!(
+        engine
+            .match_records(QueryPlan::all(counts))
+            .unwrap()
+            .records()[0]
+            .unit,
+        "items"
+    );
+    assert_eq!(
+        engine
+            .match_records(QueryPlan::all(indexes))
+            .unwrap()
+            .records()[0]
+            .key,
+        "i"
+    );
+    assert_eq!(
+        engine
+            .match_records(QueryPlan::all(marker))
+            .unwrap()
+            .records()[0]
+            .value,
+        "new"
+    );
+}
+
+#[test]
+fn interrupted_heterogeneous_evolution_leaves_every_family_predecessor() {
+    let fixture = Fixture::new();
+    let path = fixture.database_path("heterogeneous-interrupted");
+    let mut predecessor = Engine::open(EngineOpen::new(&path, SchemaVersion::new(1))).unwrap();
+    let thoughts = predecessor.register_table(fixture.descriptor_v1()).unwrap();
+    let counts = predecessor.register_table(count_v1()).unwrap();
+    predecessor
+        .assert(Assertion::new(thoughts, ThoughtV1::new("t", "kept")))
+        .unwrap();
+    predecessor
+        .assert(Assertion::new(
+            counts,
+            CountV1 {
+                key: "c".into(),
+                count: 7,
+            },
+        ))
+        .unwrap();
+    drop(predecessor);
+
+    let thought_current = fixture.descriptor_v2_with_prior();
+    let count_current = count_v2();
+    let mut engine = Engine::open(
+        EngineOpen::new(&path, SchemaVersion::new(1))
+            .with_family(&thought_current)
+            .with_family(&count_current),
+    )
+    .unwrap();
+    let thought_inventory = engine
+        .inspect_predecessor::<ThoughtV1, Thought>(&thought_current)
+        .unwrap();
+    let count_inventory = engine
+        .inspect_predecessor::<CountV1, Count>(&count_current)
+        .unwrap();
+    let before = engine.commit_log().unwrap().len();
+    let evolution = engine
+        .begin_atomic_evolution()
+        .evolve(
+            thought_inventory,
+            thought_current,
+            vec![Thought::new("t", "kept", "carried")],
+        )
+        .evolve(
+            count_inventory,
+            count_current,
+            vec![Count {
+                key: "c".into(),
+                count: 7,
+                unit: "items".into(),
+            }],
+        );
+    engine.interrupt_upgrade_at(sema_engine::UpgradeFault::AfterRowsWritten);
+    assert!(engine.commit_atomic_evolution(evolution).is_err());
+    assert_eq!(engine.commit_log().unwrap().len(), before);
+    let thoughts = engine
+        .register_table(fixture.descriptor_v1())
+        .expect("thought predecessor remains");
+    let counts = engine
+        .register_table(count_v1())
+        .expect("count predecessor remains");
+    assert_eq!(
+        engine
+            .match_records(QueryPlan::all(thoughts))
+            .unwrap()
+            .records()[0]
+            .body,
+        "kept"
+    );
+    assert_eq!(
+        engine
+            .match_records(QueryPlan::all(counts))
+            .unwrap()
+            .records()[0]
+            .count,
+        7
+    );
+}
