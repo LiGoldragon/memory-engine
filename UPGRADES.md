@@ -1,5 +1,18 @@
 # Upgrades
 
+## 0.19.0 — one Memory edit may evolve several families
+
+`AtomicEvolution` carries evolved predecessor inventories, new families, and
+writes to unchanged families through one storage transaction.
+`Engine::inspect_predecessor` reads a declared predecessor without opening it
+as the current type; `commit_atomic_evolution` validates every witnessed
+catalog identity before it lands all row changes, catalog registrations, and
+one shared commit sequence and snapshot. A failed validation or interrupted
+transaction leaves every family at its predecessor identity and contents.
+
+The existing `MemoryUpgrades::upgrade_table` remains the smaller operation for
+a record-local, one-family `UpgradeFrom`.
+
 ## 0.18.0 — Memorable: typed change and typed upgrade replace `with_prior`
 
 `TableDescriptor::with_prior(SchemaHash, Fn(Prior) -> Current)` and
