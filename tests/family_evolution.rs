@@ -762,7 +762,7 @@ fn heterogeneous_evolution_lands_catalog_rows_and_log_in_one_commit() {
         .register_table(fixture.descriptor_v2_with_prior())
         .expect("thoughts current");
     let counts = engine.register_table(count_v2()).expect("counts current");
-    let indexes = engine.register_table(indexes()).expect("indexes current");
+    let indexes_table = engine.register_table(indexes()).expect("indexes current");
     assert_eq!(
         engine
             .match_records(QueryPlan::all(thoughts))
@@ -781,7 +781,7 @@ fn heterogeneous_evolution_lands_catalog_rows_and_log_in_one_commit() {
     );
     assert_eq!(
         engine
-            .match_records(QueryPlan::all(indexes))
+            .match_records(QueryPlan::all(indexes_table))
             .unwrap()
             .records()[0]
             .key,
