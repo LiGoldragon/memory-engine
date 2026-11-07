@@ -701,12 +701,19 @@ fn heterogeneous_evolution_lands_catalog_rows_and_log_in_one_commit() {
     let count_current = count_v2();
     let mut engine = Engine::open(
         EngineOpen::new(&path, SchemaVersion::new(1))
+            .with_versioning(VersioningPolicy::new(VersionedStoreName::new(
+                "heterogeneous",
+            )))
             .with_family(&thought_current)
             .with_family(&count_current)
             .with_family(&markers()),
     )
     .expect("predecessor catalog is admitted");
     let before = engine.commit_log().expect("log reads").len();
+    let versioned_before = engine
+        .versioned_commit_log()
+        .expect("versioned log reads")
+        .len();
     let thought_inventory = engine
         .inspect_predecessor::<ThoughtV1, Thought>(&thought_current)
         .expect("thoughts inspect");
@@ -743,6 +750,13 @@ fn heterogeneous_evolution_lands_catalog_rows_and_log_in_one_commit() {
         .expect("one evolution commits");
     assert_eq!(receipt.operation_count(), 6);
     assert_eq!(engine.commit_log().expect("log rereads").len(), before + 1);
+    assert_eq!(
+        engine
+            .versioned_commit_log()
+            .expect("versioned log rereads")
+            .len(),
+        versioned_before + 1
+    );
 
     let thoughts = engine
         .register_table(fixture.descriptor_v2_with_prior())
@@ -781,6 +795,28 @@ fn heterogeneous_evolution_lands_catalog_rows_and_log_in_one_commit() {
             .value,
         "new"
     );
+    let committed_log = engine.commit_log().unwrap().len();
+    drop(engine);
+    let mut reopened = Engine::open(
+        EngineOpen::new(&path, SchemaVersion::new(1))
+            .with_versioning(VersioningPolicy::new(VersionedStoreName::new(
+                "heterogeneous",
+            )))
+            .with_family(&fixture.descriptor_v2_with_prior())
+            .with_family(&count_v2())
+            .with_family(&indexes())
+            .with_family(&markers()),
+    )
+    .expect("wholly-current store reopens");
+    assert_eq!(reopened.commit_log().unwrap().len(), committed_log);
+    assert!(
+        reopened
+            .inspect_predecessor::<ThoughtV1, Thought>(&fixture.descriptor_v2_with_prior())
+            .is_err(),
+        "a current family is not evolved a second time"
+    );
+    assert_eq!(reopened.commit_log().unwrap().len(), committed_log);
+    assert!(reopened.register_table(count_v2()).is_ok());
 }
 
 #[test]
@@ -860,4 +896,218 @@ fn interrupted_heterogeneous_evolution_leaves_every_family_predecessor() {
             .count,
         7
     );
+    drop(engine);
+    let mut reopened = Engine::open(
+        EngineOpen::new(&path, SchemaVersion::new(1))
+            .with_family(&fixture.descriptor_v2_with_prior())
+            .with_family(&count_v2()),
+    )
+    .expect("interrupted predecessor store reopens");
+    assert!(reopened.register_table(fixture.descriptor_v1()).is_ok());
+    assert!(reopened.register_table(count_v1()).is_ok());
+}
+
+#[test]
+fn heterogeneous_evolution_may_drop_move_and_empty_predecessor_rows() {
+    let fixture = Fixture::new();
+    let path = fixture.database_path("heterogeneous-cardinality");
+    let mut predecessor = Engine::open(EngineOpen::new(&path, SchemaVersion::new(1))).unwrap();
+    predecessor.register_table(fixture.descriptor_v1()).unwrap();
+    let counts = predecessor.register_table(count_v1()).unwrap();
+    predecessor
+        .assert(Assertion::new(
+            counts,
+            CountV1 {
+                key: "a".into(),
+                count: 1,
+            },
+        ))
+        .unwrap();
+    predecessor
+        .assert(Assertion::new(
+            counts,
+            CountV1 {
+                key: "b".into(),
+                count: 2,
+            },
+        ))
+        .unwrap();
+    drop(predecessor);
+
+    let thoughts = fixture.descriptor_v2_with_prior();
+    let counts = count_v2();
+    let mut engine = Engine::open(
+        EngineOpen::new(&path, SchemaVersion::new(1))
+            .with_family(&thoughts)
+            .with_family(&counts),
+    )
+    .unwrap();
+    let empty = engine
+        .inspect_predecessor::<ThoughtV1, Thought>(&thoughts)
+        .unwrap();
+    assert!(empty.rows().is_empty());
+    let old_counts = engine
+        .inspect_predecessor::<CountV1, Count>(&counts)
+        .unwrap();
+    assert_eq!(old_counts.rows().len(), 2);
+    let evolution = engine
+        .begin_atomic_evolution()
+        .evolve(empty, thoughts, Vec::new())
+        .evolve(
+            old_counts,
+            counts,
+            vec![Count {
+                key: "moved".into(),
+                count: 3,
+                unit: "total".into(),
+            }],
+        )
+        .register(indexes(), vec![Index { key: "seed".into() }]);
+    engine.commit_atomic_evolution(evolution).unwrap();
+    let counts = engine.register_table(count_v2()).unwrap();
+    let rows = engine.match_records(QueryPlan::all(counts)).unwrap();
+    assert_eq!(
+        rows.records(),
+        &[Count {
+            key: "moved".into(),
+            count: 3,
+            unit: "total".into()
+        }]
+    );
+}
+
+#[test]
+fn heterogeneous_evolution_rejects_duplicate_tables_and_successor_keys_before_writing() {
+    let fixture = Fixture::new();
+    let path = fixture.database_path("heterogeneous-duplicates");
+    let mut predecessor = Engine::open(EngineOpen::new(&path, SchemaVersion::new(1))).unwrap();
+    let thoughts = predecessor.register_table(fixture.descriptor_v1()).unwrap();
+    predecessor
+        .assert(Assertion::new(thoughts, ThoughtV1::new("t", "old")))
+        .unwrap();
+    drop(predecessor);
+
+    let current = fixture.descriptor_v2_with_prior();
+    let mut engine =
+        Engine::open(EngineOpen::new(&path, SchemaVersion::new(1)).with_family(&current)).unwrap();
+    let first = engine
+        .inspect_predecessor::<ThoughtV1, Thought>(&current)
+        .unwrap();
+    let second = engine
+        .inspect_predecessor::<ThoughtV1, Thought>(&current)
+        .unwrap();
+    let before = engine.commit_log().unwrap().len();
+    let duplicate_table = engine
+        .begin_atomic_evolution()
+        .evolve(
+            first,
+            current.clone(),
+            vec![Thought::new("t", "old", "one")],
+        )
+        .evolve(
+            second,
+            current.clone(),
+            vec![Thought::new("t", "old", "two")],
+        );
+    assert!(engine.commit_atomic_evolution(duplicate_table).is_err());
+    assert_eq!(engine.commit_log().unwrap().len(), before);
+
+    let inventory = engine
+        .inspect_predecessor::<ThoughtV1, Thought>(&current)
+        .unwrap();
+    let duplicate_key = engine.begin_atomic_evolution().evolve(
+        inventory,
+        current,
+        vec![
+            Thought::new("same", "a", "x"),
+            Thought::new("same", "b", "y"),
+        ],
+    );
+    assert!(engine.commit_atomic_evolution(duplicate_key).is_err());
+    assert_eq!(engine.commit_log().unwrap().len(), before);
+    assert!(engine.register_table(fixture.descriptor_v1()).is_ok());
+}
+
+#[test]
+fn stale_mixed_witness_refuses_before_another_predecessor_changes() {
+    let fixture = Fixture::new();
+    let path = fixture.database_path("heterogeneous-stale");
+    let mut predecessor = Engine::open(EngineOpen::new(&path, SchemaVersion::new(1))).unwrap();
+    let thoughts = predecessor.register_table(fixture.descriptor_v1()).unwrap();
+    let counts = predecessor.register_table(count_v1()).unwrap();
+    predecessor
+        .assert(Assertion::new(thoughts, ThoughtV1::new("t", "old")))
+        .unwrap();
+    predecessor
+        .assert(Assertion::new(
+            counts,
+            CountV1 {
+                key: "c".into(),
+                count: 1,
+            },
+        ))
+        .unwrap();
+    drop(predecessor);
+
+    let thought_current = fixture.descriptor_v2_with_prior();
+    let count_current = count_v2();
+    let mut engine = Engine::open(
+        EngineOpen::new(&path, SchemaVersion::new(1))
+            .with_family(&thought_current)
+            .with_family(&count_current),
+    )
+    .unwrap();
+    let stale = engine
+        .inspect_predecessor::<ThoughtV1, Thought>(&thought_current)
+        .unwrap();
+    let count_inventory = engine
+        .inspect_predecessor::<CountV1, Count>(&count_current)
+        .unwrap();
+    assert!(matches!(
+        engine.upgrade_table::<ThoughtV1, Thought>(thought_current.clone()),
+        UpgradeOutcome::Upgraded(_)
+    ));
+    let before = engine.commit_log().unwrap().len();
+    let evolution = engine
+        .begin_atomic_evolution()
+        .evolve(
+            stale,
+            thought_current,
+            vec![Thought::new("t", "old", "stale")],
+        )
+        .evolve(
+            count_inventory,
+            count_current,
+            vec![Count {
+                key: "c".into(),
+                count: 1,
+                unit: "item".into(),
+            }],
+        );
+    assert!(engine.commit_atomic_evolution(evolution).is_err());
+    assert_eq!(engine.commit_log().unwrap().len(), before);
+    assert!(
+        engine.register_table(count_v1()).is_ok(),
+        "other predecessor remains"
+    );
+}
+
+#[test]
+fn undeclared_predecessor_inspection_is_read_only() {
+    let fixture = Fixture::new();
+    let path = fixture.database_path("heterogeneous-undeclared");
+    let mut engine = Engine::open(EngineOpen::new(&path, SchemaVersion::new(1))).unwrap();
+    let thoughts = engine.register_table(fixture.descriptor_v1()).unwrap();
+    engine
+        .assert(Assertion::new(thoughts, ThoughtV1::new("t", "old")))
+        .unwrap();
+    let before = engine.commit_log().unwrap().len();
+    let undeclared = TableDescriptor::<Thought>::new(THOUGHTS, fixture.family(), fixture.hash_v2());
+    assert!(
+        engine
+            .inspect_predecessor::<ThoughtV1, Thought>(&undeclared)
+            .is_err()
+    );
+    assert_eq!(engine.commit_log().unwrap().len(), before);
+    assert!(engine.register_table(fixture.descriptor_v1()).is_ok());
 }
