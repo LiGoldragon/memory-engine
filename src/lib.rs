@@ -34,7 +34,7 @@ pub mod subscribe;
 pub mod table;
 pub mod versioning;
 
-pub use atomic::{AtomicCommit, AtomicCommitReceipt};
+pub use atomic::{AtomicCommit, AtomicCommitReceipt, AtomicEvolution, PredecessorInventory};
 pub use catalog::{Catalog, TableRegistration};
 pub use checkpoint::{
     Checkpoint, CheckpointDigest, CheckpointMetadata, CheckpointReceipt, CheckpointSegment,

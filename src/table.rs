@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use crate::{
     FamilyIdentity, FamilyName, KeyedAssertion, ManifestEdge, MemoryDefinition, QueryPlan,
-    RecordIdentifier, RecordKey, Result, SchemaHash, UpgradeFrom,
+    RecordIdentifier, RecordKey, Result, SchemaHash,
 };
 
 /// Key suffix for one identified table's durable next-record-identifier
@@ -138,12 +138,12 @@ impl<RecordValue> TableDescriptor<RecordValue> {
     /// manifest edge, mapped to the predecessor's and this definition's
     /// schema hashes. A store holding the predecessor opens, and upgrades
     /// through [`crate::MemoryUpgrades::upgrade_table`] with the authored
-    /// [`UpgradeFrom`] conversion; an undeclared stored identity keeps
+    /// typed conversion; an undeclared stored identity keeps
     /// failing closed.
     pub fn with_predecessor<Predecessor>(mut self) -> Self
     where
         Predecessor: MemoryDefinition,
-        RecordValue: UpgradeFrom<Predecessor>,
+        RecordValue: MemoryDefinition,
     {
         self.predecessors
             .push(ManifestEdge::declared::<Predecessor, RecordValue>());

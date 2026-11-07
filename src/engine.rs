@@ -42,7 +42,7 @@ use crate::{
     VersionedRecoveryTopology, VersionedReplay, VersioningPolicy, WriteOperation,
 };
 
-const CATALOG: sema::Table<&'static str, TableRegistration> =
+pub(crate) const CATALOG: sema::Table<&'static str, TableRegistration> =
     sema::Table::new("__sema_engine_catalog");
 pub(crate) const COUNTERS: sema::Table<&'static str, u64> =
     sema::Table::new("__sema_engine_counters");
@@ -3587,12 +3587,27 @@ impl Engine {
         snapshot: SnapshotIdentifier,
         operations: NonEmpty<VersionedLogOperation>,
     ) -> Result<Option<VersionedCommitLogEntry>> {
+        self.versioned_entry_with_schema(
+            commit_sequence,
+            snapshot,
+            self.store_schema_hash(),
+            operations,
+        )
+    }
+
+    pub(crate) fn versioned_entry_with_schema(
+        &self,
+        commit_sequence: crate::CommitSequence,
+        snapshot: SnapshotIdentifier,
+        schema: StoreSchemaHash,
+        operations: NonEmpty<VersionedLogOperation>,
+    ) -> Result<Option<VersionedCommitLogEntry>> {
         let Some(policy) = self.versioning_policy.as_ref() else {
             return Ok(None);
         };
         Ok(Some(VersionedCommitLogEntry::new(
             policy.store_name().clone(),
-            self.store_schema_hash(),
+            schema,
             commit_sequence,
             snapshot,
             self.latest_versioned_entry_digest()?,
