@@ -188,7 +188,7 @@ fn sema_engine_depends_on_storage_kernel_and_signal_sema_by_git() {
     let fixture = RepositoryFixture::current();
     let cargo = fixture.cargo_toml();
 
-    assert!(cargo.contains("https://github.com/LiGoldragon/sema.git"));
+    assert!(cargo.contains("https://github.com/LiGoldragon/memory.git"));
     assert!(cargo.contains("https://github.com/LiGoldragon/signal-sema.git"));
     assert!(!cargo.contains("path = \"../sema\""));
     assert!(!cargo.contains("path = \"../signal-sema\""));
