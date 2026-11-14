@@ -11,7 +11,7 @@
         { pkgs, binaries, ... }:
         let
           library = binaries "memory-engine" [ "default" ];
-          graph = builtins.genericClosure {
+          actualGraph = builtins.genericClosure {
             startSet = [
               {
                 key = library.drvPath;
@@ -25,6 +25,13 @@
                 inherit crate;
               }) node.crate.dependencies;
           };
+          graph = actualGraph ++ [
+            (let original = builtins.head (builtins.filter
+              (node: node.crate.crateName == "syn"
+                && builtins.head (pkgs.lib.splitVersion node.crate.version) == "2")
+              actualGraph);
+             in { key = original.key + "-mutation"; crate = original.crate // { drvPath = original.crate.drvPath + "-mutation"; }; })
+          ];
           names = map (node: node.crate.crateName) graph;
           # These were cargo-tree assertions in dependency_boundary.rs.
           # The effective normal build graph is the object being checked;
