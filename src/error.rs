@@ -341,9 +341,38 @@ pub enum Error {
          under the engine that wrote the store before converting"
     )]
     SemaStagingPending,
+
+    #[error(
+        "the store was upgraded from the sema format to the memory format, then refused: {refusal}"
+    )]
+    RefusedAfterSemaConversion {
+        conversion: crate::SemaConversion,
+        refusal: Box<Error>,
+    },
 }
 
 impl Error {
+    /// The conversion an open made before it refused the store: the file is
+    /// a memory store now, whatever the open then refused.
+    pub fn sema_conversion(&self) -> Option<&crate::SemaConversion> {
+        match self {
+            Self::RefusedAfterSemaConversion { conversion, .. } => Some(conversion),
+            _ => None,
+        }
+    }
+
+    /// This refusal as it reaches the opener: carrying the conversion the
+    /// open made first, when it made one.
+    pub(crate) fn after_sema_conversion(self, conversion: Option<&crate::SemaConversion>) -> Self {
+        match conversion {
+            Some(conversion) => Self::RefusedAfterSemaConversion {
+                conversion: conversion.clone(),
+                refusal: Box::new(self),
+            },
+            None => self,
+        }
+    }
+
     pub(crate) fn versioning_not_enabled(surface: &str) -> Self {
         Self::VersioningNotEnabled {
             surface: surface.to_owned(),

@@ -18,6 +18,15 @@ under the sema labels — and keeps the schema version its writer stamped.
   but 7 with `Error::StorageLayoutMismatch`, before any write.
 - An unversioned file that is not a sema file is refused as before,
   with the kernel's `LegacyFileLacksSchema`.
+- An open that converts a sema store and then refuses it, the kernel's
+  schema version guard or any later check, answers
+  `Error::RefusedAfterSemaConversion { conversion, refusal }`: the file
+  is a memory store from then on, and `Error::sema_conversion()` gives
+  the opener the receipt whether or not the open succeeds. Such a
+  refusal was, on its own, the error the check raised; a consumer that
+  matches a specific open refusal reads it from `refusal`.
+- The engine keeps no copy of the sema file; whoever deploys the
+  upgrade keeps the rollback copy.
 
 ## 0.19.0 — Convert a store sema-engine wrote
 

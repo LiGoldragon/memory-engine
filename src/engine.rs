@@ -125,25 +125,41 @@ impl Engine {
     /// Open a store only when no durable compaction recovery is pending.
     /// Call [`Engine::open_recovering`] from a supervised owner when a family
     /// directory is available to resolve a parked group before serving it.
+    ///
+    /// An open that converted a sema store and then refuses it answers
+    /// [`Error::RefusedAfterSemaConversion`], so the opener learns of the
+    /// upgrade whether or not the open succeeds.
     pub fn open(request: EngineOpen) -> Result<Self> {
         let engine = Self::open_unrecovered(request)?;
-        if let Some(intent) = engine.compaction_intent()? {
-            return Err(Error::CompactionRecoveryRequired {
+        match engine.compaction_intent() {
+            Ok(None) => Ok(engine),
+            Ok(Some(intent)) => Err(engine.refused(Error::CompactionRecoveryRequired {
                 phase: intent.phase(),
-            });
+            })),
+            Err(refusal) => Err(engine.refused(refusal)),
         }
-        Ok(engine)
     }
 
     /// Resolve a durable compaction intent before returning a serving engine.
     /// This is the sole startup surface for components with registered tables.
     pub fn open_recovering(request: EngineOpen, directory: &dyn FamilyDirectory) -> Result<Self> {
         let engine = Self::open_unrecovered(request)?;
-        engine.resume_compaction(directory)?;
-        if engine.versioning_policy.is_some() {
-            engine.compact_configured_versioned_history()?;
+        let recovered = engine.resume_compaction(directory).and_then(|()| {
+            if engine.versioning_policy.is_some() {
+                engine.compact_configured_versioned_history().map(|_| ())
+            } else {
+                Ok(())
+            }
+        });
+        match recovered {
+            Ok(()) => Ok(engine),
+            Err(refusal) => Err(engine.refused(refusal)),
         }
-        Ok(engine)
+    }
+
+    /// A refusal of this open, carrying the conversion it made first.
+    fn refused(&self, refusal: Error) -> Error {
+        refusal.after_sema_conversion(self.sema_conversion.as_ref())
     }
 
     fn open_unrecovered(request: EngineOpen) -> Result<Self> {
@@ -151,6 +167,17 @@ impl Engine {
             storage,
             conversion: sema_conversion,
         } = OpenedStorage::open(request.path(), request.schema())?;
+        Self::open_over(storage, sema_conversion.clone(), request)
+            .map_err(|refusal| refusal.after_sema_conversion(sema_conversion.as_ref()))
+    }
+
+    /// The open past the kernel: the storage layout, the versioning policy
+    /// and the declared families, over storage already open.
+    fn open_over(
+        storage: ::memory::Memory,
+        sema_conversion: Option<SemaConversion>,
+        request: EngineOpen,
+    ) -> Result<Self> {
         // Every validation runs before the first engine write: an open
         // that rejects a store must not mutate the store it rejects.
         let layout_plan = Self::validated_storage_layout(&storage)?;

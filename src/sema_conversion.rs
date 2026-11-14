@@ -127,8 +127,12 @@ impl OpenedStorage {
                     )) => return Err(unversioned.into()),
                     Err(refusal) => return Err(refusal),
                 };
+                let storage =
+                    ::memory::Memory::open_with_schema(path, schema).map_err(|refusal| {
+                        Error::from(refusal).after_sema_conversion(Some(&conversion))
+                    })?;
                 Ok(Self {
-                    storage: ::memory::Memory::open_with_schema(path, schema)?,
+                    storage,
                     conversion: Some(conversion),
                 })
             }

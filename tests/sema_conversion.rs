@@ -678,3 +678,41 @@ fn a_sema_store_at_another_layout_is_refused_and_stays_a_sema_store() {
     ));
     ::memory::SemaFile::open(&copy.path()).expect("the refused file is still a sema file");
 }
+
+#[test]
+fn an_open_that_refuses_a_store_it_upgraded_still_names_the_upgrade() {
+    let copy = LegacyCopy::in_place(ENTRIES);
+    // The fixture's writer stamped schema version 1; an opener at version 2
+    // is refused by the kernel's version guard, after the conversion.
+    let refusal = match Engine::open(EngineOpen::new(copy.path(), SchemaVersion::new(2))) {
+        Ok(_) => panic!("a store written at schema version 1 is refused at version 2"),
+        Err(refusal) => refusal,
+    };
+    let conversion = refusal
+        .sema_conversion()
+        .expect("the refusal names the conversion the open made first");
+    assert_eq!(conversion.entries(), 10);
+    assert!(matches!(
+        refusal,
+        Error::RefusedAfterSemaConversion { ref refusal, .. }
+            if matches!(**refusal, Error::Memory(_))
+    ));
+    assert!(refusal.to_string().starts_with(
+        "the store was upgraded from the sema format to the memory format, then refused: "
+    ));
+
+    // The file is a memory store now: the next open converts nothing.
+    let reopened = copy.open();
+    assert_eq!(reopened.engine.sema_conversion(), None);
+    reopened.assert_records();
+}
+
+#[test]
+fn a_refusal_with_no_upgrade_names_none() {
+    let copy = LegacyCopy::in_place(&[]);
+    let refusal = match Engine::open(EngineOpen::new(copy.path(), SchemaVersion::new(1))) {
+        Ok(_) => panic!("an unversioned file that is no sema store is refused"),
+        Err(refusal) => refusal,
+    };
+    assert_eq!(refusal.sema_conversion(), None);
+}

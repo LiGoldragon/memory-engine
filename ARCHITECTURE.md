@@ -714,7 +714,12 @@ written; nothing is stamped. An unversioned file that is no sema file
 keeps the kernel's refusal, and a sema store the conversion refuses is
 refused with that reason and stays a sema file. `Engine::sema_conversion`
 returns the receipt of a conversion this open made and `None` on every
-later open.
+later open. An open that converts the store and then refuses it,
+by the kernel's version guard or a later check, answers
+`RefusedAfterSemaConversion`, carrying the receipt beside the refusal,
+so the opener can say that the store was upgraded whether or not the
+open succeeds. The engine keeps no copy of the file it converts; the
+rollback copy is the deployer's.
 
 ## Mirror outbox and durability levels
 
