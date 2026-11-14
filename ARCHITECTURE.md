@@ -673,7 +673,8 @@ checkpoint segment digest, checkpoint digest, view digest — mix in
 
 `LegacySemaStore::new(path).convert()` is the edit those differences
 need. It opens the file read-only through the kernel's `SemaFile`,
-reads every row it rewrites, and verifies the store under the sema
+reads every row it rewrites, refuses any storage layout but 7
+(`StorageLayoutMismatch`), and verifies the store under the sema
 labels (entry digests and links, checkpoint, segment and view digests,
 checkpoint schema hashes), so a damaged store is refused, not re-signed.
 It then computes, in memory:
@@ -698,8 +699,22 @@ tables and write them. A parked staged group or pending compaction
 intent is refused (`SemaStagingPending`): its prospective digests are
 an external grant's to bind, so it is settled under the engine that
 wrote it. Every refusal happens before the file is opened for writing,
-so a refused file is left byte for byte as it was. The caller converts
-a copy and puts it in place only on success.
+so a refused file is left byte for byte as it was.
+
+`Engine::open` makes the same conversion when it finds a sema store at
+its path, so a consumer whose store sema-engine wrote is upgraded on
+its first open under this engine. The kernel refuses the file as
+unversioned (`LegacyFileLacksSchema`: it holds no `__memory_meta`
+schema version); the engine then asks the kernel's `SemaFile` whether
+it is a sema file, and converts it in place, in its one write
+transaction, only when it is one and passes every check above. The
+converted file carries the schema version its writer stamped, renamed
+with `__sema_meta`, so the kernel's version guard judges the store as
+written; nothing is stamped. An unversioned file that is no sema file
+keeps the kernel's refusal, and a sema store the conversion refuses is
+refused with that reason and stays a sema file. `Engine::sema_conversion`
+returns the receipt of a conversion this open made and `None` on every
+later open.
 
 ## Mirror outbox and durability levels
 

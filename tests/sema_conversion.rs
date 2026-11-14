@@ -86,6 +86,16 @@ impl LegacyCopy {
         self.directory.path().join("store.memory")
     }
 
+    /// The fixture placed at the memory name itself, as a consumer that
+    /// renamed its store file finds it: the engine open upgrades it there.
+    fn in_place(fixture: &[u8]) -> Self {
+        let copy = Self {
+            directory: tempfile::tempdir().expect("temp directory"),
+        };
+        std::fs::write(copy.path(), fixture).expect("fixture copies");
+        copy
+    }
+
     fn convert(&self) -> memory_engine::Result<memory_engine::SemaConversion> {
         let conversion = LegacySemaStore::new(self.legacy_path()).convert()?;
         std::fs::rename(self.legacy_path(), self.path()).expect("converted copy moves");
@@ -582,4 +592,89 @@ fn the_checkpoint_digest_binds_the_kept_origin() {
         .latest_checkpoint()
         .expect_err("the doctored origin fails the checkpoint digest");
     assert!(matches!(refusal, Error::CheckpointDigestMismatch { .. }));
+}
+
+#[test]
+fn an_engine_open_upgrades_a_sema_store_in_place_once() {
+    let copy = LegacyCopy::in_place(ENTRIES);
+    let store = copy.open();
+    let conversion = store
+        .engine
+        .sema_conversion()
+        .expect("the open converted the sema store");
+    assert_eq!(conversion.entries(), 10);
+    assert_eq!(conversion.checkpoints(), 0);
+    store.assert_records();
+    store.assert_chain();
+    assert_eq!(store.rebuild(), 10);
+    drop(store);
+
+    let reopened = copy.open();
+    assert_eq!(reopened.engine.sema_conversion(), None);
+    reopened.assert_records();
+    reopened.assert_chain();
+    assert_eq!(reopened.rebuild(), 10);
+}
+
+#[test]
+fn an_engine_open_upgrades_a_compacted_sema_store_with_its_kept_origin() {
+    let copy = LegacyCopy::in_place(COMPACTED);
+    let store = copy.open();
+    let conversion = store
+        .engine
+        .sema_conversion()
+        .expect("the open converted the sema store");
+    assert_eq!(conversion.checkpoints(), 1);
+    assert_eq!(conversion.kept_digests().len(), 1);
+    store
+        .engine
+        .latest_checkpoint()
+        .expect("converted checkpoint verifies")
+        .expect("checkpoint exists");
+}
+
+#[test]
+fn an_unversioned_file_that_is_no_sema_store_keeps_the_kernel_refusal() {
+    let copy = LegacyCopy::in_place(&[]);
+    let refusal = match Engine::open(EngineOpen::new(copy.path(), SchemaVersion::new(1))) {
+        Ok(_) => panic!("an unversioned file that is no sema store is refused"),
+        Err(refusal) => refusal,
+    };
+    assert!(matches!(
+        refusal,
+        Error::Memory(StorageKernelError::LegacyFileLacksSchema { .. })
+    ));
+}
+
+#[test]
+fn a_sema_store_at_another_layout_is_refused_and_stays_a_sema_store() {
+    const SEMA_META: ::memory::Table<&'static str, u64> = ::memory::Table::new("__sema_meta");
+    const SEMA_HEADERS: ::memory::Table<&'static str, u64> = ::memory::Table::new("__sema_headers");
+    const SEMA_COUNTERS: ::memory::Table<&'static str, u64> =
+        ::memory::Table::new("__sema_engine_counters");
+    let copy = LegacyCopy::in_place(ENTRIES);
+    // A sema store whose layout slot names 6: the kernel tables are renamed
+    // back after the write, so the file stays a sema file.
+    ::memory::SemaFile::open(&copy.path())
+        .expect("fixture is a sema file")
+        .convert(|transaction| {
+            SEMA_COUNTERS.insert(transaction, "engine_storage_layout", &6)?;
+            SEMA_META.rename_from(transaction, "__memory_meta")?;
+            SEMA_HEADERS.rename_from(transaction, "__memory_headers")?;
+            Ok(())
+        })
+        .expect("layout rewrites");
+
+    let refusal = match Engine::open(copy.policy(VersionedRecoveryTopology::LocalCheckpoint)) {
+        Ok(_) => panic!("a sema store at layout 6 is not converted"),
+        Err(refusal) => refusal,
+    };
+    assert!(matches!(
+        refusal,
+        Error::StorageLayoutMismatch {
+            stored: 6,
+            expected: 7
+        }
+    ));
+    ::memory::SemaFile::open(&copy.path()).expect("the refused file is still a sema file");
 }

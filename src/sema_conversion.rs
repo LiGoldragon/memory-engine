@@ -31,7 +31,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use ::memory::{ReadTransaction, SemaFile, Table, WriteTransaction};
+use ::memory::{ReadTransaction, Schema, SemaFile, Table, WriteTransaction};
 
 use crate::checkpoint::{CheckpointMetadata, CheckpointSegment, SegmentReference};
 use crate::compaction::CompactionIntent;
@@ -95,6 +95,48 @@ impl LegacySemaStore {
     }
 }
 
+/// The kernel storage an engine open stands on, and the conversion the open
+/// made first when the file at its path was a store sema-engine wrote.
+pub(crate) struct OpenedStorage {
+    pub(crate) storage: ::memory::Memory,
+    pub(crate) conversion: Option<SemaConversion>,
+}
+
+impl OpenedStorage {
+    /// Open the kernel at `path`. A file the kernel refuses as unversioned
+    /// is asked whether it is a store sema-engine wrote: `__sema_meta` and
+    /// `__sema_headers` under this build's rkyv header, storage layout 7, and
+    /// a log and checkpoints that verify under the sema labels. Only such a
+    /// file is converted, in place in one write transaction, and opened; it
+    /// keeps the schema version its writer stamped, so the kernel's version
+    /// guard then judges it as written. Any other unversioned file keeps the
+    /// kernel's refusal, and a sema store that fails its own verification is
+    /// refused untouched.
+    pub(crate) fn open(path: &Path, schema: &Schema) -> Result<Self> {
+        match ::memory::Memory::open_with_schema(path, schema) {
+            Ok(storage) => Ok(Self {
+                storage,
+                conversion: None,
+            }),
+            Err(unversioned @ ::memory::Error::LegacyFileLacksSchema { .. }) => {
+                let conversion = match LegacySemaStore::new(path).convert() {
+                    Ok(conversion) => conversion,
+                    Err(Error::Memory(
+                        ::memory::Error::NotSemaFile { .. }
+                        | ::memory::Error::AlreadyMemoryFile { .. },
+                    )) => return Err(unversioned.into()),
+                    Err(refusal) => return Err(refusal),
+                };
+                Ok(Self {
+                    storage: ::memory::Memory::open_with_schema(path, schema)?,
+                    conversion: Some(conversion),
+                })
+            }
+            Err(other) => Err(other.into()),
+        }
+    }
+}
+
 /// What a conversion rewrote.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemaConversion {
@@ -129,6 +171,7 @@ impl SemaConversion {
 
 /// The rows of a sema store the conversion reads, as stored.
 struct SemaRows {
+    layout: Option<u64>,
     families: Vec<FamilyIdentity>,
     latest_checkpoint: Option<u64>,
     entries: Vec<VersionedCommitLogEntry>,
@@ -143,6 +186,7 @@ struct SemaRows {
 impl SemaRows {
     fn read(transaction: &ReadTransaction) -> ::memory::Result<Self> {
         Ok(Self {
+            layout: SEMA_COUNTERS.get(transaction, crate::engine::STORAGE_LAYOUT_KEY)?,
             families: SEMA_CATALOG
                 .iter(transaction)?
                 .into_iter()
@@ -175,6 +219,14 @@ impl SemaRows {
     }
 
     fn converted(self) -> Result<ConvertedRows> {
+        // Only layout 7 is the format this conversion knows how to rewrite;
+        // a sema store at any other layout is refused before any write.
+        if self.layout != Some(crate::engine::STORAGE_LAYOUT) {
+            return Err(Error::StorageLayoutMismatch {
+                stored: self.layout.unwrap_or(crate::engine::LAYOUT_BEFORE_SLOT),
+                expected: crate::engine::STORAGE_LAYOUT,
+            });
+        }
         if self.staging_pending {
             return Err(Error::SemaStagingPending);
         }

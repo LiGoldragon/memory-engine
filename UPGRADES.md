@@ -1,5 +1,24 @@
 # Upgrades
 
+## 0.20.0 — A sema store is upgraded on open
+
+`Engine::open` (and `open_recovering`) now converts a store sema-engine
+wrote when it finds one at its path, in place and in one write
+transaction, before the open goes on as for any memory store. A
+consumer whose deployed store sema-engine wrote needs no conversion step
+of its own: repin and open. The file is recognised by its content — the
+kernel's `__sema_meta` and `__sema_headers` under this build's rkyv
+header, engine storage layout 7, and a log and checkpoints that verify
+under the sema labels — and keeps the schema version its writer stamped.
+
+- `Engine::sema_conversion()` returns the `SemaConversion` receipt of a
+  conversion this open made, and `None` for a new store, a memory store,
+  and every later open.
+- `LegacySemaStore::convert` now refuses a store at any storage layout
+  but 7 with `Error::StorageLayoutMismatch`, before any write.
+- An unversioned file that is not a sema file is refused as before,
+  with the kernel's `LegacyFileLacksSchema`.
+
 ## 0.19.0 — Convert a store sema-engine wrote
 
 A store written by sema-engine 0.15 (storage layout 7, over the sema

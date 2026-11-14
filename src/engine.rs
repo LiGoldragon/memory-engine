@@ -26,6 +26,7 @@ use crate::log::{CommitLogEntry, CommitLogOperation};
 use crate::open::{EngineOpen, FamilyKeying, OpenFault};
 use crate::outbox::{Durability, MirrorAcknowledgement, MirrorHead, Outbox, OutboxEntry};
 use crate::query::{CommittedRows, ReadPlanExecution};
+use crate::sema_conversion::OpenedStorage;
 use crate::staging::{
     DeltaAnnouncer, DiscardStagedReceipt, MaterializeStagedReceipt, OverlayEffect, OverlayPresence,
     StageReceipt, StagedGroupSummary, Staging, StagingBase, StagingSession,
@@ -37,11 +38,11 @@ use crate::{
     IdentifiedQueryPlan, IdentifiedQuerySnapshot, IdentifiedRecord, IdentifiedRetraction,
     IdentifiedTableDescriptor, IdentifiedTableReference, InitialSnapshot, KeyedAssertion,
     KeyedMutation, QueryPlan, QuerySnapshot, RecordIdentifier, RecordKey, ReplayReceipt, Result,
-    Retraction, SequenceRange, SnapshotIdentifier, StoreSchemaHash, SubscriptionHandle,
-    SubscriptionIdentifier, SubscriptionReceipt, SubscriptionRegistration, SubscriptionSink,
-    TableDescriptor, TableName, TableReference, TableRegistration, VersionedCommitLogEntry,
-    VersionedHistoryAcknowledgement, VersionedLogOperation, VersionedPayload,
-    VersionedRecoveryTopology, VersionedReplay, VersioningPolicy, WriteOperation,
+    Retraction, SemaConversion, SequenceRange, SnapshotIdentifier, StoreSchemaHash,
+    SubscriptionHandle, SubscriptionIdentifier, SubscriptionReceipt, SubscriptionRegistration,
+    SubscriptionSink, TableDescriptor, TableName, TableReference, TableRegistration,
+    VersionedCommitLogEntry, VersionedHistoryAcknowledgement, VersionedLogOperation,
+    VersionedPayload, VersionedRecoveryTopology, VersionedReplay, VersioningPolicy, WriteOperation,
 };
 
 pub(crate) const CATALOG: ::memory::Table<&'static str, TableRegistration> =
@@ -52,7 +53,7 @@ pub(crate) const LATEST_COMMIT_SEQUENCE_KEY: &str = "latest_commit_sequence";
 pub(crate) const LATEST_SNAPSHOT_KEY: &str = "latest_snapshot";
 const NEXT_SUBSCRIPTION_KEY: &str = "next_subscription";
 pub(crate) const LATEST_CHECKPOINT_KEY: &str = "latest_checkpoint";
-const STORAGE_LAYOUT_KEY: &str = "engine_storage_layout";
+pub(crate) const STORAGE_LAYOUT_KEY: &str = "engine_storage_layout";
 /// Engine-internal storage layout version. Layout 2 introduced typed
 /// family identity in the catalog and versioned log; layout 3 added
 /// the mirror outbox row beside every versioned entry; layout 4 made
@@ -66,9 +67,9 @@ const STORAGE_LAYOUT_KEY: &str = "engine_storage_layout";
 /// A's bump was additive over the data tables. A store at an older
 /// layout with no versioned log still hard-fails at open and is rebuilt
 /// through checkpoint import or versioned replay.
-const STORAGE_LAYOUT: u64 = 7;
+pub(crate) const STORAGE_LAYOUT: u64 = 7;
 /// The layout of stores written before the layout slot existed.
-const LAYOUT_BEFORE_SLOT: u64 = 1;
+pub(crate) const LAYOUT_BEFORE_SLOT: u64 = 1;
 pub(crate) const SUBSCRIPTIONS: ::memory::Table<u64, SubscriptionRegistration> =
     ::memory::Table::new("__memory_engine_subscriptions");
 pub(crate) const IDENTIFIED_COUNTERS: ::memory::Table<String, u64> =
@@ -86,6 +87,9 @@ const COMPACTION_INTENT_KEY: &str = "pending";
 
 pub struct Engine {
     pub(crate) storage: ::memory::Memory,
+    /// The conversion this open made when the file was a store sema-engine
+    /// wrote.
+    sema_conversion: Option<SemaConversion>,
     pub(crate) catalog: Catalog,
     pub(crate) subscriptions: SubscriptionRegistry,
     pub(crate) versioning_policy: Option<VersioningPolicy>,
@@ -143,7 +147,10 @@ impl Engine {
     }
 
     fn open_unrecovered(request: EngineOpen) -> Result<Self> {
-        let storage = ::memory::Memory::open_with_schema(request.path(), request.schema())?;
+        let OpenedStorage {
+            storage,
+            conversion: sema_conversion,
+        } = OpenedStorage::open(request.path(), request.schema())?;
         // Every validation runs before the first engine write: an open
         // that rejects a store must not mutate the store it rejects.
         let layout_plan = Self::validated_storage_layout(&storage)?;
@@ -185,6 +192,7 @@ impl Engine {
         )?;
         Ok(Self {
             storage,
+            sema_conversion,
             catalog,
             subscriptions: SubscriptionRegistry::new(),
             versioning_policy: request.versioning_policy().cloned(),
@@ -194,6 +202,12 @@ impl Engine {
             upgrade_fault: std::sync::Mutex::new(None),
             subscription_durable_cleanup_fault: std::sync::Mutex::new(false),
         })
+    }
+
+    /// The conversion this open made first, when the file at its path was
+    /// a store sema-engine wrote; `None` for a new store or a memory store.
+    pub fn sema_conversion(&self) -> Option<&SemaConversion> {
+        self.sema_conversion.as_ref()
     }
 
     pub fn register_table<RecordValue>(
