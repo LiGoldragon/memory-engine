@@ -247,7 +247,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.10";
+            packageId = "syn 3.0.5";
             usesDefaultFeatures = false;
             features = [ "clone-impls" "derive" "full" "parsing" "printing" "proc-macro" ];
           }
@@ -318,9 +318,9 @@ rec {
       };
       "cpufeatures" = rec {
         crateName = "cpufeatures";
-        version = "0.3.0";
+        version = "0.3.1";
         edition = "2024";
-        sha256 = "00fjhygsqmh4kbxxlb99mcsbspxcai6hjydv4c46pwb67wwl2alb";
+        sha256 = "0rkm1l35jy1z1yfg723fddsxc7vr0gc1hhfvc138hnqiwc58p8jw";
         authors = [
           "RustCrypto Developers"
         ];
@@ -900,7 +900,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.10";
+            packageId = "syn 3.0.5";
             usesDefaultFeatures = false;
             features = [ "clone-impls" "derive" "full" "parsing" "printing" "proc-macro" ];
           }
@@ -1136,7 +1136,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.10";
+            packageId = "syn 3.0.5";
             usesDefaultFeatures = false;
             features = [ "clone-impls" "derive" "parsing" "printing" "proc-macro" ];
           }
@@ -1368,11 +1368,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "clone-impls" "full" "parsing" "printing" "proc-macro" ];
       };
-      "syn 3.0.10" = rec {
+      "syn 3.0.5" = rec {
         crateName = "syn";
-        version = "3.0.10";
+        version = "3.0.5";
         edition = "2021";
-        sha256 = "0ygaz8ccgap0vb0faifk1xv1p2sayg490r038fab1c57lfzcrsaa";
+        sha256 = "1yc9vbm1wqs68fyj5f1f3f9isyh6i7wpxccvfrgpfnzn200jxpqj";
         authors = [
           "David Tolnay <dtolnay@gmail.com>"
         ];
@@ -1489,7 +1489,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.10";
+            packageId = "syn 3.0.5";
           }
         ];
 
@@ -1609,9 +1609,9 @@ rec {
       };
       "wasip2" = rec {
         crateName = "wasip2";
-        version = "1.0.4+wasi-0.2.12";
+        version = "1.0.1+wasi-0.2.4";
         edition = "2021";
-        sha256 = "11wl7lqwq4pbmlmzr6n7bwz0hzy1z6sxc4554bkmrr86w4vznzmn";
+        sha256 = "1rsqmpspwy0zja82xx7kbkbg9fv34a4a2if3sbd76dy64a244qh5";
         dependencies = [
           {
             name = "wit-bindgen";
@@ -1726,7 +1726,7 @@ rec {
           }
           {
             name = "syn";
-            packageId = "syn 3.0.10";
+            packageId = "syn 3.0.5";
             features = [ "visit" "visit-mut" "full" "extra-traits" ];
           }
           {
@@ -2143,20 +2143,17 @@ rec {
       };
       "wit-bindgen" = rec {
         crateName = "wit-bindgen";
-        version = "0.57.1";
-        edition = "2024";
-        sha256 = "0vjk2jb593ri9k1aq4iqs2si9mrw5q46wxnn78im7hm7hx799gqy";
+        version = "0.46.0";
+        edition = "2021";
+        sha256 = "0ngysw50gp2wrrfxbwgp6dhw1g6sckknsn3wm7l00vaf7n48aypi";
         libName = "wit_bindgen";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
         features = {
-          "async-spawn" = [ "async" "dep:futures" "std" ];
+          "async" = [ "macros" "std" "dep:futures" "dep:once_cell" "wit-bindgen-rust-macro/async" ];
           "bitflags" = [ "dep:bitflags" ];
-          "default" = [ "macros" "realloc" "async" "std" "bitflags" "macro-string" ];
-          "futures-stream" = [ "async" "dep:futures" ];
-          "inter-task-wakeup" = [ "async" ];
-          "macro-string" = [ "wit-bindgen-rust-macro?/macro-string" ];
+          "default" = [ "macros" "realloc" "async" "std" "bitflags" ];
           "macros" = [ "dep:wit-bindgen-rust-macro" ];
           "rustc-dep-of-std" = [ "dep:core" "dep:alloc" ];
         };
