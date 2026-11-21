@@ -1,5 +1,24 @@
 # Upgrades
 
+## 0.19.1 — bounded first-N key-range reads
+
+`QueryPlan::first_in_key_range` creates a distinct `BoundedKeyRangePlan`,
+executed with `Engine::match_first_in_key_range`. It reads the inclusive
+string-key range in ascending order and returns at most the caller's
+`KeyRangeLimit`. A zero limit returns no rows without visiting a table range.
+Committed rows use sema's deferred `visit_range` visitor and stop after the
+requested number of visible results. In a staged session, the latest
+replacement or tombstone for each key is merged before a committed payload is
+decoded; buffered operations are traversed to build that overlay, so total
+staged-history work is separate from the result limit. Sparse deletions can
+require visiting additional committed keys before the result is full.
+
+The storage kernel dependency now resolves through the authoritative
+`LiGoldragon/memory` repository at sema 0.1.2 revision
+`712a4a9177e71dc2b397cf4e5a5c65b4fa3c0ec8`; this is the published source of
+the deferred ordered-range visitor. Existing unbounded `QueryPlan` reads are
+unchanged.
+
 ## 0.19.0 — one Memory edit may evolve several families
 
 `AtomicEvolution` carries evolved predecessor inventories, new families, and

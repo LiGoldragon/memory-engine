@@ -189,6 +189,16 @@ sections that follow realize it.
   missing mutation or retraction records (`RecordNotFound`) with typed
   errors before writing.
 - `Match` reads records through a registered record family.
+- `QueryPlan::first_in_key_range` creates a separate `BoundedKeyRangePlan`:
+  an inclusive ascending string-key range whose result holds at most the
+  supplied `KeyRangeLimit`. `Engine::match_first_in_key_range` visits
+  committed rows through the kernel's deferred ordered-range visitor and
+  stops when the visible prefix is full. A staged session merges its latest
+  per-key replacement or tombstone before decoding a shadowed committed row.
+  Staged operation history is traversed to construct that overlay, and
+  tombstones may require visiting more committed keys than the returned row
+  count; the result limit is not a bound on total staged-history or key-visit
+  work. A zero limit visits no table rows.
 - `Validate` dry-runs executable read plans through a registered record
   family without mutating storage.
 - `ReadPlan` owns query-algebra vocabulary for `Match`, `Subscribe`, and

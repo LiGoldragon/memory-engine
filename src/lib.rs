@@ -62,10 +62,11 @@ pub use non_empty::{NonEmpty, NonEmptyError, NonEmptyIterator};
 pub use open::{DeclaresFamily, EngineOpen, FamilyDeclaration, FamilyKeying, OpenFault};
 pub use outbox::{Durability, MirrorAcknowledgement, MirrorHead, OutboxEntry};
 pub use query::{
-    AggregatePlan, FieldSelection, IdentifiedQueryPlan, IdentifiedQuerySnapshot,
-    IdentifiedReadPlan, IdentifiedReadPlanNode, KeyRange, QueryFilter, QueryPlan, QuerySnapshot,
-    ReadOperator, ReadPlan, ReadPlanExecution, ReadPlanNode, RecordFilter, RecordIdentifierRange,
-    RecordPredicate, RecursionMode, RowSource, RuleSetRef, UnificationPlan, ValidationReceipt,
+    AggregatePlan, BoundedKeyRangePlan, FieldSelection, IdentifiedQueryPlan,
+    IdentifiedQuerySnapshot, IdentifiedReadPlan, IdentifiedReadPlanNode, KeyRange, KeyRangeLimit,
+    QueryFilter, QueryPlan, QuerySnapshot, ReadOperator, ReadPlan, ReadPlanExecution, ReadPlanNode,
+    RecordFilter, RecordIdentifierRange, RecordPredicate, RecursionMode, RowSource, RuleSetRef,
+    UnificationPlan, ValidationReceipt,
 };
 pub use record::{
     EngineRecord, EngineStoredRecord, EngineStoredValue, RecordIdentifier, RecordKey, RecordKeyKind,

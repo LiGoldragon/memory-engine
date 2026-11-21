@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, ops::Bound, sync::Arc};
 
 use signal_sema::SemaOperation;
 
@@ -22,6 +22,30 @@ pub struct QueryPlan<RecordValue> {
     read_plan: ReadPlan<RecordValue>,
 }
 
+/// A query that reads the first `limit` visible rows of a key range, in
+/// ascending key order. Unlike `QueryPlan`, this plan has no later filter or
+/// transform that could change what “first” means.
+#[derive(Debug, Clone)]
+pub struct BoundedKeyRangePlan<RecordValue> {
+    table: TableReference<RecordValue>,
+    range: KeyRange,
+    limit: KeyRangeLimit,
+}
+
+/// The maximum number of visible rows returned by a bounded key-range read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyRangeLimit(usize);
+
+impl KeyRangeLimit {
+    pub const fn new(value: usize) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> usize {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct IdentifiedQueryPlan<RecordValue> {
     table: IdentifiedTableReference<RecordValue>,
@@ -29,6 +53,21 @@ pub struct IdentifiedQueryPlan<RecordValue> {
 }
 
 impl<RecordValue> QueryPlan<RecordValue> {
+    /// Build a bounded read of the first `limit` rows in an inclusive key
+    /// range. Rows are returned in ascending key order. A zero limit returns
+    /// no rows and does not visit table rows.
+    pub fn first_in_key_range(
+        table: TableReference<RecordValue>,
+        range: KeyRange,
+        limit: KeyRangeLimit,
+    ) -> BoundedKeyRangePlan<RecordValue> {
+        BoundedKeyRangePlan {
+            table,
+            range,
+            limit,
+        }
+    }
+
     pub fn all(table: TableReference<RecordValue>) -> Self {
         Self {
             table,
@@ -125,6 +164,20 @@ impl<RecordValue> QueryPlan<RecordValue> {
     }
 }
 
+impl<RecordValue> BoundedKeyRangePlan<RecordValue> {
+    pub fn table(&self) -> &TableReference<RecordValue> {
+        &self.table
+    }
+
+    pub fn range(&self) -> &KeyRange {
+        &self.range
+    }
+
+    pub const fn limit(&self) -> KeyRangeLimit {
+        self.limit
+    }
+}
+
 impl<RecordValue> IdentifiedQueryPlan<RecordValue> {
     pub fn all(table: IdentifiedTableReference<RecordValue>) -> Self {
         Self {
@@ -214,6 +267,28 @@ impl KeyRange {
     pub fn contains(&self, key: &RecordKey) -> bool {
         self.start.as_ref().is_none_or(|start| key >= start)
             && self.end.as_ref().is_none_or(|end| key <= end)
+    }
+
+    /// The corresponding inclusive string-key bounds for a normal table.
+    /// Normal tables store domain strings; identifiers sort after every
+    /// domain key, so an identifier lower bound admits no normal-table row
+    /// and an identifier upper bound is unbounded for these rows.
+    pub(crate) fn domain_bounds(&self) -> Option<(Bound<String>, Bound<String>)> {
+        let start = match self.start.as_ref() {
+            None => Bound::Unbounded,
+            Some(RecordKey::Domain(value)) => Bound::Included(value.clone()),
+            Some(RecordKey::Identifier(_)) => return None,
+        };
+        let end = match self.end.as_ref() {
+            None | Some(RecordKey::Identifier(_)) => Bound::Unbounded,
+            Some(RecordKey::Domain(value)) => Bound::Included(value.clone()),
+        };
+        if let (Bound::Included(start), Bound::Included(end)) = (&start, &end)
+            && start > end
+        {
+            return None;
+        }
+        Some((start, end))
     }
 }
 

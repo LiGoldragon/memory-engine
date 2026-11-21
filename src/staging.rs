@@ -602,6 +602,32 @@ impl StagingSession {
         effects
     }
 
+    /// Visit a table's buffered overlay in group order without collecting a
+    /// second history-sized vector. The visitor may keep the latest effect
+    /// per key for bounded reads; its borrowed payloads remain valid for the
+    /// duration of this staging session.
+    pub(crate) fn visit_overlay_effects_for_table<'session>(
+        &'session self,
+        table_name: &str,
+        mut visit: impl FnMut(&'session RecordKey, OverlayEffect<'session>),
+    ) {
+        for entry in &self.entries {
+            for operation in entry.operations() {
+                if operation.family().table_name() != table_name {
+                    continue;
+                }
+                let Some(key) = operation.key() else {
+                    continue;
+                };
+                let effect = match operation.payload() {
+                    VersionedPayload::Record { bytes } => OverlayEffect::Upsert(bytes),
+                    VersionedPayload::Tombstone => OverlayEffect::Remove,
+                };
+                visit(key, effect);
+            }
+        }
+    }
+
     /// Consume the session into the durable group to park. Empty when
     /// nothing was buffered — the caller skips the park and reports
     /// nothing staged.

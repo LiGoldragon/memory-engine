@@ -1,5 +1,8 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    ops::ControlFlow,
+};
 
 use crate::non_empty::NonEmpty;
 use rkyv::api::high::HighDeserializer;
@@ -23,7 +26,7 @@ use crate::import::{ImportReceipt, ImportSession};
 use crate::log::{CommitLogEntry, CommitLogOperation};
 use crate::open::{EngineOpen, FamilyKeying, OpenFault};
 use crate::outbox::{Durability, MirrorAcknowledgement, MirrorHead, Outbox, OutboxEntry};
-use crate::query::{CommittedRows, ReadPlanExecution};
+use crate::query::{BoundedKeyRangePlan, CommittedRows, ReadPlanExecution};
 use crate::staging::{
     DeltaAnnouncer, DiscardStagedReceipt, MaterializeStagedReceipt, OverlayEffect, OverlayPresence,
     StageReceipt, StagedGroupSummary, Staging, StagingBase, StagingSession,
@@ -1157,6 +1160,194 @@ impl Engine {
         })?;
         let records = records?;
 
+        Ok(QuerySnapshot::new(
+            SemaOperation::Match,
+            *query.table().name(),
+            database_marker,
+            records,
+        ))
+    }
+
+    /// Read at most the first visible rows in a key range, in ascending key
+    /// order. The committed table is visited in key order and stops as soon
+    /// as the result is full; staged replacements and tombstones are merged
+    /// before a committed payload is decoded.
+    pub fn match_first_in_key_range<RecordValue>(
+        &self,
+        query: BoundedKeyRangePlan<RecordValue>,
+    ) -> Result<QuerySnapshot<RecordValue>>
+    where
+        RecordValue: EngineStoredValue,
+        <RecordValue as rkyv::Archive>::Archived: rkyv::Deserialize<RecordValue, HighDeserializer<rancor::Error>>
+            + for<'validation> CheckBytes<
+                Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+            >,
+    {
+        self.ensure_registered(query.table())?;
+        let staging = self.staging_guard();
+        if let Some(session) = staging.as_ref() {
+            return self.staged_match_first_in_key_range(session, query);
+        }
+        drop(staging);
+
+        let (database_marker, records) = self.storage.read(|transaction| {
+            let marker = Self::database_marker_from_values(
+                COUNTERS.get(transaction, LATEST_COMMIT_SEQUENCE_KEY)?,
+                COUNTERS.get(transaction, LATEST_SNAPSHOT_KEY)?,
+            );
+            let records = Self::committed_first_in_key_range(transaction, &query)?;
+            Ok((marker, records))
+        })?;
+        Ok(QuerySnapshot::new(
+            SemaOperation::Match,
+            *query.table().name(),
+            database_marker,
+            records,
+        ))
+    }
+
+    fn committed_first_in_key_range<RecordValue>(
+        transaction: &sema::ReadTransaction,
+        query: &BoundedKeyRangePlan<RecordValue>,
+    ) -> sema::Result<Vec<RecordValue>>
+    where
+        RecordValue: EngineStoredValue,
+        <RecordValue as rkyv::Archive>::Archived: rkyv::Deserialize<RecordValue, HighDeserializer<rancor::Error>>
+            + for<'validation> CheckBytes<
+                Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+            >,
+    {
+        let limit = query.limit().value();
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let Some((lower, upper)) = query.range().domain_bounds() else {
+            return Ok(Vec::new());
+        };
+        let mut records = Vec::new();
+        query
+            .table()
+            .sema_table()
+            .visit_range::<String>(transaction, (lower, upper), |entry| {
+                let (_key, record) = entry.decode()?;
+                records.push(record);
+                Ok(if records.len() == limit {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                })
+            })?;
+        Ok(records)
+    }
+
+    fn staged_match_first_in_key_range<RecordValue>(
+        &self,
+        session: &StagingSession,
+        query: BoundedKeyRangePlan<RecordValue>,
+    ) -> Result<QuerySnapshot<RecordValue>>
+    where
+        RecordValue: EngineStoredValue,
+        <RecordValue as rkyv::Archive>::Archived: rkyv::Deserialize<RecordValue, HighDeserializer<rancor::Error>>
+            + for<'validation> CheckBytes<
+                Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+            >,
+    {
+        let limit = query.limit().value();
+        let mut records = Vec::new();
+        if limit > 0
+            && let Some((lower, upper)) = query.range().domain_bounds()
+        {
+            let mut latest_overlays = BTreeMap::new();
+            session.visit_overlay_effects_for_table(
+                query.table().name().as_str(),
+                |key, effect| {
+                    if query.range().contains(key) {
+                        latest_overlays.insert(key.to_owned_string(), effect);
+                    }
+                },
+            );
+
+            let mut overlays = latest_overlays.into_iter().peekable();
+            let mut staged_decode_error = None;
+            self.storage.read(|transaction| {
+                query.table().sema_table().visit_range::<String>(
+                    transaction,
+                    (lower, upper),
+                    |entry| {
+                        let key = entry.key();
+                        while overlays
+                            .peek()
+                            .is_some_and(|(overlay_key, _)| overlay_key.as_str() < key.as_str())
+                        {
+                            let (_, effect) =
+                                overlays.next().expect("peek confirmed an overlay effect");
+                            if let OverlayEffect::Upsert(bytes) = effect {
+                                match Self::decode_staged_payload(
+                                    bytes,
+                                    query.table().name().as_str(),
+                                ) {
+                                    Ok(record) => records.push(record),
+                                    Err(error) => {
+                                        staged_decode_error = Some(error);
+                                        return Ok(ControlFlow::Break(()));
+                                    }
+                                }
+                                if records.len() == limit {
+                                    return Ok(ControlFlow::Break(()));
+                                }
+                            }
+                        }
+                        if overlays
+                            .peek()
+                            .is_some_and(|(overlay_key, _)| overlay_key.as_str() == key.as_str())
+                        {
+                            let (_, effect) =
+                                overlays.next().expect("peek confirmed an overlay effect");
+                            if let OverlayEffect::Upsert(bytes) = effect {
+                                match Self::decode_staged_payload(
+                                    bytes,
+                                    query.table().name().as_str(),
+                                ) {
+                                    Ok(record) => records.push(record),
+                                    Err(error) => {
+                                        staged_decode_error = Some(error);
+                                        return Ok(ControlFlow::Break(()));
+                                    }
+                                }
+                            }
+                        } else {
+                            let (_key, record) = entry.decode()?;
+                            records.push(record);
+                        }
+                        Ok(if records.len() == limit {
+                            ControlFlow::Break(())
+                        } else {
+                            ControlFlow::Continue(())
+                        })
+                    },
+                )?;
+                Ok(())
+            })?;
+            if let Some(error) = staged_decode_error {
+                return Err(error);
+            }
+
+            for (_, effect) in overlays {
+                if records.len() == limit {
+                    break;
+                }
+                if let OverlayEffect::Upsert(bytes) = effect {
+                    records.push(Self::decode_staged_payload(
+                        bytes,
+                        query.table().name().as_str(),
+                    )?);
+                }
+            }
+        }
+        let database_marker = crate::DatabaseMarker::new(
+            session.engaged_commit_sequence(),
+            session.engaged_snapshot(),
+        );
         Ok(QuerySnapshot::new(
             SemaOperation::Match,
             *query.table().name(),
