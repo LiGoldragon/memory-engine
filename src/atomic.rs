@@ -902,3 +902,115 @@ impl Engine {
         ))
     }
 }
+
+/// Outcome of a complete-record guarded replacement.
+#[derive(Debug)]
+pub enum ConditionalReplaceOutcome {
+    Missing,
+    Stale,
+    KeyMismatch,
+    Aborted(Error),
+    /// Commit returned an error; durable operation evidence is required to resolve it.
+    Indeterminate(sema::Error),
+    Committed {
+        receipt: AtomicCommitReceipt,
+        maintenance: Option<Error>,
+    },
+}
+
+impl Engine {
+    /// Replace one complete record only if the persisted record equals `expected`.
+    pub fn conditional_replace<RecordValue>(
+        &self,
+        table: TableReference<RecordValue>,
+        expected: RecordValue,
+        replacement: RecordValue,
+    ) -> ConditionalReplaceOutcome
+    where
+        RecordValue: EngineStoredRecord + PartialEq + Send + Sync + 'static,
+        <RecordValue as rkyv::Archive>::Archived: rkyv::Deserialize<RecordValue, HighDeserializer<rancor::Error>>
+            + for<'validation> CheckBytes<
+                Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+            >,
+    {
+        use std::ops::ControlFlow;
+        let key = expected.record_key();
+        if key != replacement.record_key() {
+            return ConditionalReplaceOutcome::KeyMismatch;
+        }
+        let guard = self.write_guard();
+        let prepare = || -> Result<_> {
+            self.ensure_atomic_registered(&table)?;
+            if self.staging_guard().is_some() {
+                return Err(Error::StagedChangeUnsupported {
+                    table: table.name().as_str().to_owned(),
+                });
+            }
+            let sequence = self.next_commit_sequence()?;
+            let snapshot = self.next_snapshot()?;
+            let entry = CommitLogEntry::single(
+                sequence,
+                snapshot,
+                CommitLogOperation::new(SemaOperation::Mutate, *table.name(), Some(key.clone())),
+            );
+            let versioned = self.versioned_record_entry(
+                sequence,
+                snapshot,
+                SemaOperation::Mutate,
+                *table.name(),
+                Some(key.clone()),
+                &replacement,
+            )?;
+            let counts = self.log_counts()?;
+            Ok((sequence, snapshot, entry, versioned, counts))
+        };
+        let (sequence, snapshot, entry, versioned, counts) = match prepare() {
+            Ok(value) => value,
+            Err(error) => return ConditionalReplaceOutcome::Aborted(error),
+        };
+        let result = self.storage.write_conditional(|transaction| {
+            let current = table
+                .sema_table()
+                .get_in_write(transaction, key.to_owned_string())?;
+            match current {
+                None => return Ok(ControlFlow::Break(ConditionalReplaceOutcome::Missing)),
+                Some(current) if current != expected => {
+                    return Ok(ControlFlow::Break(ConditionalReplaceOutcome::Stale));
+                }
+                Some(_) => {}
+            }
+            table
+                .sema_table()
+                .insert(transaction, key.to_owned_string(), &replacement)?;
+            CommitLog::append_commit(transaction, &entry, counts.next_commit())?;
+            self.insert_versioned_entry(transaction, &versioned, counts.next_versioned())?;
+            COUNTERS.insert(transaction, LATEST_COMMIT_SEQUENCE_KEY, &sequence.value())?;
+            COUNTERS.insert(transaction, LATEST_SNAPSHOT_KEY, &snapshot.value())?;
+            Ok(ControlFlow::Continue(()))
+        });
+        match result {
+            Ok(ControlFlow::Break(refusal)) => refusal,
+            Err(sema::WriteFailure::BeforeCommit(error)) => {
+                ConditionalReplaceOutcome::Aborted(error.into())
+            }
+            Err(sema::WriteFailure::Commit(error)) => {
+                ConditionalReplaceOutcome::Indeterminate(error)
+            }
+            Ok(ControlFlow::Continue(())) => {
+                self.atomic_announce(
+                    DeltaKind::Mutate,
+                    *table.name(),
+                    &key,
+                    snapshot,
+                    &replacement,
+                );
+                let receipt = AtomicCommitReceipt::new(sequence, snapshot, 1);
+                drop(guard);
+                ConditionalReplaceOutcome::Committed {
+                    receipt,
+                    maintenance: self.maintain_versioned_history().err(),
+                }
+            }
+        }
+    }
+}

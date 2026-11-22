@@ -189,7 +189,7 @@ fn sema_engine_depends_on_storage_kernel_and_signal_sema_by_git() {
     let cargo = fixture.cargo_toml();
 
     assert!(cargo.contains("https://github.com/LiGoldragon/memory.git"));
-    assert!(cargo.contains("rev = \"712a4a9177e71dc2b397cf4e5a5c65b4fa3c0ec8\""));
+    assert!(cargo.contains("rev = \"6c722306c7ac8fbd0ae5077e211adf3b4dfbfa47\""));
     assert!(cargo.contains("https://github.com/LiGoldragon/signal-sema.git"));
     assert!(!cargo.contains("path = \"../sema\""));
     assert!(!cargo.contains("path = \"../signal-sema\""));

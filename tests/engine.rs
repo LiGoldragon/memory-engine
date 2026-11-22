@@ -840,3 +840,150 @@ fn engine_rejects_unregistered_record_family() {
         sema_engine::Error::TableNotRegistered { .. }
     ));
 }
+
+#[test]
+fn guarded_replace_race_reopen_and_guarded_inverse() {
+    use sema_engine::atomic::ConditionalReplaceOutcome as Outcome;
+    use std::sync::{Arc, Barrier};
+    let fixture = EngineFixture::new();
+    let mut engine = fixture.open_engine();
+    let table = engine.register_table(fixture.toy_descriptor()).unwrap();
+    let original = ToyRecord::new("key", "original");
+    assert!(matches!(
+        engine.conditional_replace(table, original.clone(), ToyRecord::new("key", "x")),
+        Outcome::Missing
+    ));
+    engine
+        .assert(Assertion::new(table, original.clone()))
+        .unwrap();
+    assert!(matches!(
+        engine.conditional_replace(table, ToyRecord::new("key", "stale"), original.clone()),
+        Outcome::Stale
+    ));
+    assert!(matches!(
+        engine.conditional_replace(table, original.clone(), ToyRecord::new("other", "bad")),
+        Outcome::KeyMismatch
+    ));
+    let engine = Arc::new(engine);
+    let barrier = Arc::new(Barrier::new(3));
+    let mut threads = Vec::new();
+    for body in ["one", "two"] {
+        let (engine, barrier, original) = (engine.clone(), barrier.clone(), original.clone());
+        threads.push(std::thread::spawn(move || {
+            let replacement = ToyRecord::new("key", body);
+            barrier.wait();
+            let outcome = engine.conditional_replace(table, original, replacement.clone());
+            (outcome, replacement)
+        }));
+    }
+    barrier.wait();
+    let outcomes: Vec<_> = threads
+        .into_iter()
+        .map(|thread| thread.join().unwrap())
+        .collect();
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|(o, _)| matches!(
+                o,
+                Outcome::Committed {
+                    maintenance: None,
+                    ..
+                }
+            ))
+            .count(),
+        1
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|(o, _)| matches!(o, Outcome::Stale))
+            .count(),
+        1
+    );
+    let winner = outcomes
+        .into_iter()
+        .find_map(|(outcome, record)| {
+            matches!(outcome, Outcome::Committed { .. }).then_some(record)
+        })
+        .unwrap();
+    drop(engine);
+    let mut engine = fixture.open_engine();
+    let table = engine.register_table(fixture.toy_descriptor()).unwrap();
+    assert_eq!(
+        engine
+            .match_records(QueryPlan::all(table))
+            .unwrap()
+            .records(),
+        &[winner.clone()]
+    );
+    assert!(matches!(
+        engine.conditional_replace(
+            table,
+            original.clone(),
+            ToyRecord::new("key", "bad rollback")
+        ),
+        Outcome::Stale
+    ));
+    assert!(matches!(
+        engine.conditional_replace(table, winner, original.clone()),
+        Outcome::Committed {
+            maintenance: None,
+            ..
+        }
+    ));
+    assert_eq!(
+        engine
+            .match_records(QueryPlan::all(table))
+            .unwrap()
+            .records(),
+        &[original]
+    );
+}
+
+#[test]
+fn guarded_replace_is_ordered_with_ordinary_mutation() {
+    use sema_engine::atomic::ConditionalReplaceOutcome as Outcome;
+    use std::sync::{Arc, Barrier};
+    let fixture = EngineFixture::new();
+    let mut engine = fixture.open_engine();
+    let table = engine.register_table(fixture.toy_descriptor()).unwrap();
+    let initial = ToyRecord::new("key", "initial");
+    engine
+        .assert(Assertion::new(table, initial.clone()))
+        .unwrap();
+    let engine = Arc::new(engine);
+    let barrier = Arc::new(Barrier::new(3));
+    let ordinary = {
+        let (engine, barrier) = (engine.clone(), barrier.clone());
+        std::thread::spawn(move || {
+            barrier.wait();
+            engine
+                .mutate(Mutation::new(table, ToyRecord::new("key", "ordinary")))
+                .unwrap()
+        })
+    };
+    let guarded = {
+        let (engine, barrier) = (engine.clone(), barrier.clone());
+        std::thread::spawn(move || {
+            barrier.wait();
+            engine.conditional_replace(table, initial, ToyRecord::new("key", "guarded"))
+        })
+    };
+    barrier.wait();
+    let ordinary = ordinary.join().unwrap();
+    let guarded = guarded.join().unwrap();
+    let current = engine.match_records(QueryPlan::all(table)).unwrap();
+    assert_eq!(current.records(), &[ToyRecord::new("key", "ordinary")]);
+    match guarded {
+        Outcome::Stale => assert_eq!(ordinary.commit_sequence(), CommitSequence::new(2)),
+        Outcome::Committed {
+            receipt,
+            maintenance: None,
+        } => {
+            assert_eq!(receipt.commit_sequence(), CommitSequence::new(2));
+            assert_eq!(ordinary.commit_sequence(), CommitSequence::new(3));
+        }
+        other => panic!("unexpected outcome: {other:?}"),
+    }
+}
