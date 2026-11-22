@@ -915,7 +915,7 @@ fn guarded_replace_race_reopen_and_guarded_inverse() {
             .match_records(QueryPlan::all(table))
             .unwrap()
             .records(),
-        &[winner.clone()]
+        std::slice::from_ref(&winner)
     );
     assert!(matches!(
         engine.conditional_replace(
