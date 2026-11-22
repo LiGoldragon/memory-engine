@@ -15,7 +15,7 @@ path = "src/lib.rs"
 [dependencies]
 blake3 = "1"
 rkyv = { version = "0.8", default-features = false, features = ["std", "bytecheck", "little_endian", "pointer_width_32", "unaligned"] }
-sema = { git = "https://github.com/LiGoldragon/memory.git", rev = "712a4a9177e71dc2b397cf4e5a5c65b4fa3c0ec8" }
+sema = { git = "file:///home/li/Code/memory-family-guard-9e4c75", rev = "ad56c893aea98ed954cf881aaa60d74a32d58eab" }
 signal-sema = { git = "https://github.com/LiGoldragon/signal-sema.git", rev = "4f3a24e6677ab9d200672851016c4c760c1e36e8", default-features = false }
 thiserror = "2"
 

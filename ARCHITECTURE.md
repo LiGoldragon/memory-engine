@@ -188,6 +188,15 @@ sections that follow realize it.
   duplicate Assert keys against table state (`DuplicateAssertKey`), and
   missing mutation or retraction records (`RecordNotFound`) with typed
   errors before writing.
+- `CompareAndReplaceFamily` compares a complete domain-keyed, decoded
+  family with its expected rows inside the writer transaction. Row order
+  does not matter; duplicates are invalid in either input collection.
+  A matching replacement writes only added, changed and removed rows
+  through the ordinary atomic history path. Drift and unchanged matches
+  create neither history nor deltas. A commit error carries tentative
+  markers, while a maintenance failure after a successful commit carries
+  the durable receipt. Storage read or stored row-key errors are distinct
+  from drift.
 - `Match` reads records through a registered record family.
 - `QueryPlan::first_in_key_range` creates a separate `BoundedKeyRangePlan`:
   an inclusive ascending string-key range whose result holds at most the

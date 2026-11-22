@@ -34,7 +34,12 @@ pub mod subscribe;
 pub mod table;
 pub mod versioning;
 
-pub use atomic::{AtomicCommit, AtomicCommitReceipt, AtomicEvolution, PredecessorInventory};
+pub use atomic::{
+    AtomicCommit, AtomicCommitReceipt, AtomicEvolution, CompareAndReplaceFamily,
+    FamilyReplacementAttempt, FamilyReplacementBodyError, FamilyReplacementFailure,
+    FamilyReplacementInputError, FamilyReplacementOutcome, FamilyReplacementSide,
+    PredecessorInventory,
+};
 pub use catalog::{Catalog, TableRegistration};
 pub use checkpoint::{
     Checkpoint, CheckpointDigest, CheckpointMetadata, CheckpointReceipt, CheckpointSegment,

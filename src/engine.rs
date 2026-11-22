@@ -3813,6 +3813,12 @@ impl Engine {
         self.ensure_registered(table)
     }
 
+    pub(crate) fn has_identified_counter(&self, table: &TableName) -> sema::Result<bool> {
+        let key = table.identified_counter_key();
+        self.storage
+            .read(|transaction| Ok(IDENTIFIED_COUNTERS.get(transaction, key)?.is_some()))
+    }
+
     pub(crate) fn atomic_read<RecordValue>(
         &self,
         table: &TableReference<RecordValue>,

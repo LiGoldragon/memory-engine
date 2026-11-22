@@ -4,7 +4,7 @@
 //! table, while the engine retains the typed table handles needed to materialize
 //! every operation in the same SEMA write transaction.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::non_empty::NonEmpty;
 use rkyv::api::high::HighDeserializer;
@@ -15,12 +15,12 @@ use rkyv::validation::archive::ArchiveValidator;
 use rkyv::validation::shared::SharedValidator;
 use signal_sema::SemaOperation;
 
-use crate::commit_log::CommitLog;
+use crate::commit_log::{CommitLog, LogCounts};
 use crate::engine::{COUNTERS, LATEST_COMMIT_SEQUENCE_KEY, LATEST_SNAPSHOT_KEY};
 use crate::{
-    CommitLogEntry, CommitLogOperation, CommitSequence, DeltaKind, Engine, EngineStoredRecord,
-    EngineStoredValue, Error, RecordKey, Result, SnapshotIdentifier, TableName, TableReference,
-    VersionedLogOperation, VersionedPayload,
+    CommitLogEntry, CommitLogOperation, CommitSequence, DeltaKind, Engine, EngineRecord,
+    EngineStoredRecord, EngineStoredValue, Error, RecordKey, Result, SnapshotIdentifier, TableName,
+    TableReference, VersionedCommitLogEntry, VersionedLogOperation, VersionedPayload,
 };
 
 /// A heterogeneous write group. Construct it with [`Engine::begin_atomic_commit`].
@@ -135,6 +135,125 @@ impl AtomicCommitReceipt {
     }
 }
 
+/// A conditional replacement of one complete domain-keyed family.
+pub struct CompareAndReplaceFamily<RecordValue> {
+    table: TableReference<RecordValue>,
+    expected: Vec<RecordValue>,
+    replacement: Vec<RecordValue>,
+}
+
+impl<RecordValue> CompareAndReplaceFamily<RecordValue> {
+    pub fn new(
+        table: TableReference<RecordValue>,
+        expected: Vec<RecordValue>,
+        replacement: Vec<RecordValue>,
+    ) -> Self {
+        Self {
+            table,
+            expected,
+            replacement,
+        }
+    }
+}
+
+impl<RecordValue: EngineRecord> CompareAndReplaceFamily<RecordValue> {
+    fn keyed_rows(
+        rows: Vec<RecordValue>,
+        side: FamilyReplacementSide,
+    ) -> std::result::Result<BTreeMap<RecordKey, RecordValue>, FamilyReplacementInputError> {
+        let mut keyed = BTreeMap::new();
+        for row in rows {
+            let key = row.record_key();
+            if !matches!(key, RecordKey::Domain(_)) {
+                return Err(FamilyReplacementInputError::NotDomainKey { side, key });
+            }
+            match keyed.entry(key) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(row);
+                }
+                std::collections::btree_map::Entry::Occupied(entry) => {
+                    return Err(FamilyReplacementInputError::DuplicateKey {
+                        side,
+                        key: entry.key().clone(),
+                    });
+                }
+            }
+        }
+        Ok(keyed)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FamilyReplacementSide {
+    Expected,
+    Replacement,
+}
+
+#[derive(Debug)]
+pub enum FamilyReplacementInputError {
+    DuplicateKey {
+        side: FamilyReplacementSide,
+        key: RecordKey,
+    },
+    NotDomainKey {
+        side: FamilyReplacementSide,
+        key: RecordKey,
+    },
+}
+
+#[derive(Debug)]
+pub enum FamilyReplacementBodyError {
+    Read(sema::Error),
+    IdentifiedFamily(TableName),
+    MismatchedStoredKey {
+        storage_key: RecordKey,
+        row_key: RecordKey,
+    },
+    Prepare(Error),
+    Write(sema::Error),
+}
+
+#[derive(Debug)]
+pub enum FamilyReplacementFailure {
+    UnregisteredFamily(Error),
+    Open(sema::Error),
+    Body {
+        error: FamilyReplacementBodyError,
+        abort_error: Option<sema::Error>,
+    },
+    Discard(sema::Error),
+}
+
+/// The markers prepared for an attempted write, not a durability receipt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FamilyReplacementAttempt {
+    pub commit_sequence: CommitSequence,
+    pub snapshot: SnapshotIdentifier,
+    pub operation_count: usize,
+}
+
+#[derive(Debug)]
+pub enum FamilyReplacementOutcome {
+    InvalidInput(FamilyReplacementInputError),
+    Drift,
+    Unchanged,
+    FailedBeforeCommit(FamilyReplacementFailure),
+    IndeterminateCommit {
+        tentative: FamilyReplacementAttempt,
+        source: sema::Error,
+    },
+    Committed {
+        receipt: AtomicCommitReceipt,
+        maintenance: Option<Error>,
+    },
+}
+
+#[derive(Debug)]
+enum FamilyReplacementDiscard {
+    Drift,
+    Unchanged,
+}
+
 #[derive(Clone, Copy)]
 enum AtomicKind {
     Assert,
@@ -207,6 +326,39 @@ where
     fn prepare(&self, engine: &Engine) -> Result<PreparedAtomicWrite> {
         engine.ensure_atomic_registered(&self.table)?;
         let prior = engine.atomic_read(&self.table, &self.key)?;
+        self.prepare_with_prior(engine, prior)
+    }
+
+    fn materialize(&self, transaction: &sema::WriteTransaction) -> sema::Result<()> {
+        match self.kind {
+            AtomicKind::Assert | AtomicKind::Mutate => self.table.sema_table().insert(
+                transaction,
+                self.key.to_owned_string(),
+                self.record.as_ref().expect("record-bearing write"),
+            ),
+            AtomicKind::Retract => {
+                self.table
+                    .sema_table()
+                    .remove(transaction, self.key.to_owned_string())?;
+                Ok(())
+            }
+        }
+    }
+}
+
+impl<RecordValue> TypedAtomicWrite<RecordValue>
+where
+    RecordValue: EngineStoredValue + Send + Sync + 'static,
+    <RecordValue as rkyv::Archive>::Archived: rkyv::Deserialize<RecordValue, HighDeserializer<rancor::Error>>
+        + for<'validation> CheckBytes<
+            Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+        >,
+{
+    fn prepare_with_prior(
+        &self,
+        engine: &Engine,
+        prior: Option<RecordValue>,
+    ) -> Result<PreparedAtomicWrite> {
         match (self.kind, prior.as_ref()) {
             (AtomicKind::Assert, Some(_)) => {
                 return Err(engine.atomic_duplicate_assert(&self.table, &self.key));
@@ -249,28 +401,93 @@ where
             }),
         })
     }
-
-    fn materialize(&self, transaction: &sema::WriteTransaction) -> sema::Result<()> {
-        match self.kind {
-            AtomicKind::Assert | AtomicKind::Mutate => self.table.sema_table().insert(
-                transaction,
-                self.key.to_owned_string(),
-                self.record.as_ref().expect("record-bearing write"),
-            ),
-            AtomicKind::Retract => {
-                self.table
-                    .sema_table()
-                    .remove(transaction, self.key.to_owned_string())?;
-                Ok(())
-            }
-        }
-    }
 }
 
 struct PreparedAtomicWrite {
     operation: CommitLogOperation,
     versioned: Option<VersionedLogOperation>,
     delta: Box<dyn AtomicDelta>,
+}
+
+struct PreparedAtomicCommit {
+    commit_sequence: CommitSequence,
+    snapshot: SnapshotIdentifier,
+    writes: Vec<PreparedAtomicWrite>,
+    entry: CommitLogEntry,
+    versioned_entry: Option<VersionedCommitLogEntry>,
+    counts: LogCounts,
+}
+
+impl PreparedAtomicCommit {
+    fn new(engine: &Engine, writes: Vec<PreparedAtomicWrite>) -> Result<Self> {
+        let commit_sequence = engine.next_commit_sequence()?;
+        let snapshot = engine.next_snapshot()?;
+        let operations =
+            NonEmpty::try_from_vec(writes.iter().map(|item| item.operation.clone()).collect())
+                .map_err(|_| Error::EmptyAtomicCommit)?;
+        let entry = CommitLogEntry::new(commit_sequence, snapshot, operations);
+        let versioned_operations: Vec<_> = writes
+            .iter()
+            .filter_map(|item| item.versioned.clone())
+            .collect();
+        let versioned_entry = if engine.versioning_policy.is_some() {
+            engine.versioned_entry(
+                commit_sequence,
+                snapshot,
+                NonEmpty::try_from_vec(versioned_operations)
+                    .map_err(|_| Error::EmptyAtomicCommit)?,
+            )?
+        } else {
+            None
+        };
+        Ok(Self {
+            commit_sequence,
+            snapshot,
+            writes,
+            entry,
+            versioned_entry,
+            counts: engine.log_counts()?,
+        })
+    }
+
+    fn land<'write>(
+        &self,
+        engine: &Engine,
+        transaction: &sema::WriteTransaction,
+        writes: impl IntoIterator<Item = &'write dyn AtomicWrite>,
+    ) -> sema::Result<()> {
+        for write in writes {
+            write.materialize(transaction)?;
+        }
+        CommitLog::append_commit(transaction, &self.entry, self.counts.next_commit())?;
+        engine.insert_versioned_entry(
+            transaction,
+            &self.versioned_entry,
+            self.counts.next_versioned(),
+        )?;
+        COUNTERS.insert(
+            transaction,
+            LATEST_COMMIT_SEQUENCE_KEY,
+            &self.commit_sequence.value(),
+        )?;
+        COUNTERS.insert(transaction, LATEST_SNAPSHOT_KEY, &self.snapshot.value())?;
+        Ok(())
+    }
+
+    fn announce(&self, engine: &Engine) -> AtomicCommitReceipt {
+        for item in &self.writes {
+            item.delta.announce(engine, self.snapshot);
+        }
+        AtomicCommitReceipt::new(self.commit_sequence, self.snapshot, self.writes.len())
+    }
+
+    fn attempted(&self) -> FamilyReplacementAttempt {
+        FamilyReplacementAttempt {
+            commit_sequence: self.commit_sequence,
+            snapshot: self.snapshot,
+            operation_count: self.writes.len(),
+        }
+    }
 }
 
 trait AtomicDelta {
@@ -322,48 +539,153 @@ impl Engine {
             }
             prepared.push(write.prepare(self)?);
         }
-        let commit_sequence = self.next_commit_sequence()?;
-        let snapshot = self.next_snapshot()?;
-        let operations =
-            NonEmpty::try_from_vec(prepared.iter().map(|item| item.operation.clone()).collect())
-                .map_err(|_| Error::EmptyAtomicCommit)?;
-        let entry = CommitLogEntry::new(commit_sequence, snapshot, operations);
-        let versioned_operations: Vec<_> = prepared
-            .iter()
-            .filter_map(|item| item.versioned.clone())
-            .collect();
-        let versioned_entry = if self.versioning_policy.is_some() {
-            self.versioned_entry(
-                commit_sequence,
-                snapshot,
-                NonEmpty::try_from_vec(versioned_operations)
-                    .map_err(|_| Error::EmptyAtomicCommit)?,
-            )?
-        } else {
-            None
-        };
-        let counts = self.log_counts()?;
+        let prepared = PreparedAtomicCommit::new(self, prepared)?;
         self.storage.write(|transaction| {
-            for write in &commit.writes {
-                write.materialize(transaction)?;
-            }
-            CommitLog::append_commit(transaction, &entry, counts.next_commit())?;
-            self.insert_versioned_entry(transaction, &versioned_entry, counts.next_versioned())?;
-            COUNTERS.insert(
-                transaction,
-                LATEST_COMMIT_SEQUENCE_KEY,
-                &commit_sequence.value(),
-            )?;
-            COUNTERS.insert(transaction, LATEST_SNAPSHOT_KEY, &snapshot.value())?;
-            Ok(())
+            prepared.land(self, transaction, commit.writes.iter().map(Box::as_ref))
         })?;
-        for item in &prepared {
-            item.delta.announce(self, snapshot);
-        }
-        let receipt = AtomicCommitReceipt::new(commit_sequence, snapshot, prepared.len());
+        let receipt = prepared.announce(self);
         drop(_write_guard);
         self.maintain_versioned_history()?;
         Ok(receipt)
+    }
+
+    /// Replace exactly the expected keyed set in one registered family. Both
+    /// the complete comparison and all durable effects use one writer
+    /// transaction. Input order does not affect the comparison.
+    pub fn compare_and_replace_family<RecordValue>(
+        &self,
+        request: CompareAndReplaceFamily<RecordValue>,
+    ) -> FamilyReplacementOutcome
+    where
+        RecordValue: EngineStoredRecord + Eq + Send + Sync + 'static,
+        <RecordValue as rkyv::Archive>::Archived: rkyv::Deserialize<RecordValue, HighDeserializer<rancor::Error>>
+            + for<'validation> CheckBytes<
+                Strategy<Validator<ArchiveValidator<'validation>, SharedValidator>, rancor::Error>,
+            >,
+    {
+        use sema::{WriteDecision, WriteFailure, WriteOutcome};
+
+        let CompareAndReplaceFamily {
+            table,
+            expected,
+            replacement,
+        } = request;
+        let expected =
+            match CompareAndReplaceFamily::keyed_rows(expected, FamilyReplacementSide::Expected) {
+                Ok(rows) => rows,
+                Err(error) => return FamilyReplacementOutcome::InvalidInput(error),
+            };
+        let replacement = match CompareAndReplaceFamily::keyed_rows(
+            replacement,
+            FamilyReplacementSide::Replacement,
+        ) {
+            Ok(rows) => rows,
+            Err(error) => return FamilyReplacementOutcome::InvalidInput(error),
+        };
+        let write_guard = self.write_guard();
+        if let Err(error) = self.ensure_atomic_registered(&table) {
+            return FamilyReplacementOutcome::FailedBeforeCommit(
+                FamilyReplacementFailure::UnregisteredFamily(error),
+            );
+        }
+        let outcome = self.storage.write_with_disposition(|transaction| {
+            if self
+                .has_identified_counter(table.name())
+                .map_err(FamilyReplacementBodyError::Read)?
+            {
+                return Err(FamilyReplacementBodyError::IdentifiedFamily(*table.name()));
+            }
+            let rows = table
+                .sema_table()
+                .rows_in_write_transaction(transaction)
+                .map_err(FamilyReplacementBodyError::Read)?;
+            let mut observed = BTreeMap::new();
+            for (key, row) in rows {
+                let storage_key = RecordKey::domain(key);
+                let row_key = row.record_key();
+                if storage_key != row_key {
+                    return Err(FamilyReplacementBodyError::MismatchedStoredKey {
+                        storage_key,
+                        row_key,
+                    });
+                }
+                observed.insert(storage_key, row);
+            }
+            if observed != expected {
+                return Ok(WriteDecision::Discard(FamilyReplacementDiscard::Drift));
+            }
+            if observed == replacement {
+                return Ok(WriteDecision::Discard(FamilyReplacementDiscard::Unchanged));
+            }
+            let keys = observed
+                .keys()
+                .chain(replacement.keys())
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let mut prepared = Vec::new();
+            let mut writes = Vec::new();
+            for key in keys {
+                let prior = observed.remove(&key);
+                let next = replacement.get(&key);
+                let kind = match (&prior, next) {
+                    (None, Some(_)) => AtomicKind::Assert,
+                    (Some(_), None) => AtomicKind::Retract,
+                    (Some(prior), Some(next)) if prior != next => AtomicKind::Mutate,
+                    _ => continue,
+                };
+                let write = TypedAtomicWrite::new(kind, table, key, next.cloned());
+                prepared.push(
+                    write
+                        .prepare_with_prior(self, prior)
+                        .map_err(FamilyReplacementBodyError::Prepare)?,
+                );
+                writes.push(write);
+            }
+            let prepared = PreparedAtomicCommit::new(self, prepared)
+                .map_err(FamilyReplacementBodyError::Prepare)?;
+            prepared
+                .land(
+                    self,
+                    transaction,
+                    writes.iter().map(|write| write as &dyn AtomicWrite),
+                )
+                .map_err(FamilyReplacementBodyError::Write)?;
+            Ok(WriteDecision::Commit(prepared))
+        });
+        match outcome {
+            Ok(WriteOutcome::Discarded(FamilyReplacementDiscard::Drift)) => {
+                FamilyReplacementOutcome::Drift
+            }
+            Ok(WriteOutcome::Discarded(FamilyReplacementDiscard::Unchanged)) => {
+                FamilyReplacementOutcome::Unchanged
+            }
+            Ok(WriteOutcome::Committed(prepared)) => {
+                let receipt = prepared.announce(self);
+                drop(write_guard);
+                FamilyReplacementOutcome::Committed {
+                    receipt,
+                    maintenance: self.maintain_versioned_history().err(),
+                }
+            }
+            Err(WriteFailure::Open(source)) => {
+                FamilyReplacementOutcome::FailedBeforeCommit(FamilyReplacementFailure::Open(source))
+            }
+            Err(WriteFailure::Body { error, abort_error }) => {
+                FamilyReplacementOutcome::FailedBeforeCommit(FamilyReplacementFailure::Body {
+                    error,
+                    abort_error,
+                })
+            }
+            Err(WriteFailure::Discard(source)) => FamilyReplacementOutcome::FailedBeforeCommit(
+                FamilyReplacementFailure::Discard(source),
+            ),
+            Err(WriteFailure::CommitIndeterminate { tentative, source }) => {
+                FamilyReplacementOutcome::IndeterminateCommit {
+                    tentative: tentative.attempted(),
+                    source,
+                }
+            }
+        }
     }
 }
 
