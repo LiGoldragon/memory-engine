@@ -516,7 +516,7 @@ dependencies = [
 [[package]]
 name = "sema"
 version = "0.1.2"
-source = "git+file:///home/li/Code/memory-family-guard-9e4c75?rev=ad56c893aea98ed954cf881aaa60d74a32d58eab#ad56c893aea98ed954cf881aaa60d74a32d58eab"
+source = "git+https://github.com/LiGoldragon/memory.git?rev=ad56c893aea98ed954cf881aaa60d74a32d58eab#ad56c893aea98ed954cf881aaa60d74a32d58eab"
 dependencies = [
  "redb",
  "rkyv",
